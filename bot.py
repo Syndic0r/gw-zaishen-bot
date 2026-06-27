@@ -108,7 +108,9 @@ async def refresh_guild(gconf):
 
     # suppress=True / suppress_embeds=True strip the wiki-link preview embeds so the post stays compact
     try:
-        if mid and last and last.id == mid:
+        # same day + our message is still last -> edit in place. On a NEW day we always delete the
+        # old (yesterday's) message and post a fresh one at the bottom, so old dailies don't pile up.
+        if not new_day and mid and last and last.id == mid:
             msg = await ch.fetch_message(mid)
             await msg.edit(
                 content=content, view=view, suppress=True, allowed_mentions=NONE_MENTIONS

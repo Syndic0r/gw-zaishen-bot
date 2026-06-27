@@ -129,6 +129,19 @@ def test_rollover_first_post_and_new_day(tmp_path):
     assert mid == 999
 
 
+def test_rollover_returns_old_message_to_delete(tmp_path):
+    fresh(tmp_path)
+    storage.set_message_id(G1, 999)  # a message posted "today"
+    # force the stored day into the past so the next call sees a new Zaishen day
+    storage._db().execute("UPDATE pinned SET zday = '2000-01-01' WHERE guild_id = ?", (G1,))
+    storage._db().commit()
+    new_day, mid, first_ever = storage.begin_day_rollover(G1)
+    assert new_day is True
+    assert mid == 999  # returns yesterday's message id so the caller can delete it
+    assert first_ever is False
+    assert storage.message_id(G1) is None  # DB slot cleared -> a fresh message is posted
+
+
 # ---- history ---------------------------------------------------------------
 def test_signup_history(tmp_path):
     fresh(tmp_path)

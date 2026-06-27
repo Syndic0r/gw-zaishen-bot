@@ -332,9 +332,11 @@ def set_message_id(guild_id, mid):
 
 def begin_day_rollover(guild_id):
     """For the keep-at-bottom loop (caller holds `lock`): if a new Zaishen day started for this guild,
-    record the day's quests and drop the pinned message so a fresh post is made. Returns
-    (new_day, message_id, first_ever) - first_ever is True when the guild has no pinned row yet, so
-    the caller can skip the daily ping on the very first post."""
+    record the day's quests and clear the pinned slot so a fresh post is made. Returns
+    (new_day, message_id, first_ever) where message_id is the EXISTING/previous message (on a new day
+    that's yesterday's post, which the caller deletes when posting the new one so it doesn't linger).
+    first_ever is True when the guild has no pinned row yet, so the caller can skip the daily ping on
+    the very first post."""
     today = zaishen.zaishen_day().isoformat()
     row = (
         _db()
@@ -357,7 +359,8 @@ def begin_day_rollover(guild_id):
             (guild_id, today),
         )
         _db().commit()
-        mid = None
+        # keep `mid` = the previous (yesterday's) message id so the caller can delete it; the DB slot
+        # is now NULL, marking that a fresh message must be posted.
     return new_day, mid, first_ever
 
 
