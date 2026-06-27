@@ -288,7 +288,14 @@ async def enable_cmd(interaction: discord.Interaction):
 @app_commands.default_permissions(manage_guild=True)
 @app_commands.guild_only()
 async def adminrole_cmd(interaction: discord.Interaction, role: discord.Role = None):
-    # only true server admins (Manage Server) decide who else gets admin - hidden from everyone else
+    # only true server admins (Manage Server) decide who else gets admin. default_permissions is just
+    # a UI hint a server owner can override, so re-check server-side (and NOT via the bot-admin role -
+    # a bot-admin must not be able to promote others).
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message(
+            "Only members with **Manage Server** can change the bot-admin role.", ephemeral=True
+        )
+        return
     async with storage.lock:
         storage.set_admin_role(interaction.guild_id, role.id if role else None)
     await interaction.response.send_message(
