@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Add the bot / website
+    url: https://gw-zaishen-bot.duckdns.org/
+    about: Info on adding GW Zaishen to your server, plus the privacy policy and terms.

@@ -1,0 +1,29 @@
+name: Bug report
+description: Something the bot does wrong (wrong quest, missing post, broken button, ...)
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what did the bot do instead?
+      placeholder: I ran /zaishen today and the mission was wrong...
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command or action
+      description: The slash command or button involved, if any.
+      placeholder: /zaishen when Thirsty River
+  - type: input
+    id: when
+    attributes:
+      label: When (date + roughly what time UTC)
+      description: Quests roll over at 16:00 UTC, so the time matters for rotation bugs.
+      placeholder: 2026-06-27, ~17:00 UTC
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots of the message help a lot. Don't include any tokens or secrets.
