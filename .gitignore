@@ -1,0 +1,17 @@
+# secrets / runtime state — never commit
+*.conf
+state.json
+gw1.db
+gw1.db-wal
+gw1.db-shm
+
+# python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
