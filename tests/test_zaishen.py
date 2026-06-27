@@ -76,3 +76,37 @@ def test_wraparound():
         "combat", base + timedelta(days=28)
     )
     _ = later
+
+
+def test_next_occurrence_today_and_future():
+    from datetime import timedelta
+
+    today = date(2026, 6, 27)  # mission = Blacktide Den (verified above)
+    # the active quest's next occurrence is today itself
+    assert zaishen.next_occurrence("mission", "Blacktide Den", today) == today
+    # case-insensitive match
+    assert zaishen.next_occurrence("mission", "blacktide den", today) == today
+    # tomorrow's mission (Against the Charr) is found one day out
+    assert zaishen.next_occurrence("mission", "Against the Charr", today) == today + timedelta(
+        days=1
+    )
+    # a name not in the cycle returns None
+    assert zaishen.next_occurrence("mission", "Not A Quest", today) is None
+    # the returned day always reproduces the quest
+    d = zaishen.next_occurrence("vanquish", "Sparkfly Swamp", today)
+    assert zaishen.quest_for("vanquish", d) == "Sparkfly Swamp"
+
+
+def test_types_with_quest():
+    # Raisu Palace appears in BOTH the mission and vanquish cycles
+    types = [qt for qt, _e, _l, _n in zaishen.types_with_quest("Raisu Palace")]
+    assert types == ["mission", "vanquish"]
+    # canonical capitalization is returned regardless of input case
+    assert zaishen.types_with_quest("thirsty river")[0][3] == "Thirsty River"
+    assert zaishen.types_with_quest("nope") == []
+
+
+def test_all_quest_names_unique_sorted():
+    names = zaishen.all_quest_names()
+    assert names == sorted(set(names), key=str.casefold)
+    assert "Thirsty River" in names and "Sparkfly Swamp" in names

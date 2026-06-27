@@ -4,24 +4,29 @@ Slash-command groups.
 /ign - your GW1 character names (self-declared; no third-party login, since GW1 has no account API).
 A GW1 account has several characters, so you can register several names. One can be your "favorite",
 which is the only one shown next to your handle on the daily roster. No favorite -> nothing is shown.
-  /ign add <name>        register a character name
-  /ign remove <name>     remove one of your names
-  /ign favorite <name>   choose the name shown on the roster
-  /ign unfavorite        show none of your names on the roster
-  /ign who [@user]       show all of a player's names (* marks the favorite); defaults to you
-  /ign clear             remove all of your names
+  /ign add <name> [prof]      register a character name (optionally with a profession)
+  /ign remove <name>          remove one of your names
+  /ign favorite <name>        choose the name shown on the roster
+  /ign unfavorite             show none of your names on the roster
+  /ign profession <name> [p]  set/clear a character's profession (shown next to the name)
+  /ign who [@user]            show all of a player's names (* marks the favorite); defaults to you
+  /ign clear                  remove all of your names
 """
 
 import discord
 from discord import app_commands
 
 import storage
+import zaishen
 from config import NONE_MENTIONS
 from views import PagedList
 
 MAX_IGN_LEN = 40  # GW1 character names are short; cap to keep the roster tidy
 
 esc = discord.utils.escape_markdown  # neutralize markdown in user-supplied names on display
+
+# dropdown of the ten GW1 professions for the optional profession on /ign add and /ign profession
+PROFESSION_CHOICES = [app_commands.Choice(name=p, value=p) for p in zaishen.PROFESSIONS]
 
 
 def _clean_ign(name):
@@ -31,11 +36,11 @@ def _clean_ign(name):
 
 
 async def _own_name_autocomplete(interaction: discord.Interaction, current: str):
-    """Suggest the invoker's own registered names (for remove / favorite)."""
+    """Suggest the invoker's own registered names (for remove / favorite / profession)."""
     cur = current.lower()
     return [
         app_commands.Choice(name=("* " + n) if fav else n, value=n)
-        for n, fav in storage.names_for(interaction.user.id)
+        for n, fav, _prof in storage.names_for(interaction.user.id)
         if cur in n.lower()
     ][:25]
 
@@ -44,8 +49,14 @@ ign = app_commands.Group(name="ign", description="Your GW1 character names")
 
 
 @ign.command(name="add", description="Register a GW1 character name")
-@app_commands.describe(name="A character name on your GW1 account")
-async def ign_add(interaction: discord.Interaction, name: str):
+@app_commands.describe(
+    name="A character name on your GW1 account",
+    profession="Optional: this character's profession (shown on the roster)",
+)
+@app_commands.choices(profession=PROFESSION_CHOICES)
+async def ign_add(
+    interaction: discord.Interaction, name: str, profession: app_commands.Choice[str] = None
+):
     name = _clean_ign(name)
     if not name:
         await interaction.response.send_message(
@@ -57,17 +68,40 @@ async def ign_add(interaction: discord.Interaction, name: str):
             f"That's a bit long - keep it under {MAX_IGN_LEN} characters.", ephemeral=True
         )
         return
+    prof = profession.value if profession else None
     async with storage.lock:
-        result = storage.add_ign(interaction.user.id, name)
+        result = storage.add_ign(interaction.user.id, name, prof)
         has_fav = storage.favorite_name(interaction.user.id) is not None
     if result == "exists":
-        msg = f"You already have **{esc(name)}**."
+        msg = f"You already have **{esc(name)}** - change its profession with `/ign profession`."
     elif result == "full":
         msg = f"You've hit the limit of {storage.MAX_IGNS} names - remove one with `/ign remove` first."
     else:
-        msg = f"✅ Added **{esc(name)}**."
+        msg = f"✅ Added **{esc(name)}**" + (f" ({prof})." if prof else ".")
         if not has_fav:
             msg += " Set it as the one shown on the roster with `/ign favorite`."
+    await interaction.response.send_message(msg, ephemeral=True, allowed_mentions=NONE_MENTIONS)
+
+
+@ign.command(name="profession", description="Set or clear the profession on one of your names")
+@app_commands.describe(
+    name="Which character", profession="Profession to set (leave empty to clear it)"
+)
+@app_commands.autocomplete(name=_own_name_autocomplete)
+@app_commands.choices(profession=PROFESSION_CHOICES)
+async def ign_profession(
+    interaction: discord.Interaction, name: str, profession: app_commands.Choice[str] = None
+):
+    name = _clean_ign(name)
+    prof = profession.value if profession else None
+    async with storage.lock:
+        ok = storage.set_profession(interaction.user.id, name, prof)
+    if not ok:
+        msg = f"You don't have **{esc(name)}** - add it first with `/ign add`."
+    elif prof:
+        msg = f"✅ **{esc(name)}** is now a {prof}."
+    else:
+        msg = f"✅ Cleared the profession on **{esc(name)}**."
     await interaction.response.send_message(msg, ephemeral=True, allowed_mentions=NONE_MENTIONS)
 
 
@@ -127,7 +161,10 @@ async def ign_who(interaction: discord.Interaction, user: discord.Member = None)
             allowed_mentions=NONE_MENTIONS,
         )
         return
-    lines = [f"{'⭐ ' if fav else '• '}{esc(n)}" for n, fav in names]
+    lines = [
+        f"{'⭐ ' if fav else '• '}{esc(n)}" + (f" - _{esc(prof)}_" if prof else "")
+        for n, fav, prof in names
+    ]
     view = PagedList(
         interaction.user.id, lines, title=f"{esc(target.display_name)}'s GW1 names ({len(names)})"
     )

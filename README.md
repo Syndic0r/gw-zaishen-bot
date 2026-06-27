@@ -19,8 +19,10 @@ part of the project that runs in Discord; the website and deployment live elsewh
 - **Per-mission sign-up** - one toggle button per daily (🗺️🎯⚔️💀), plus ✅ All and 🧹 Sign off all.
   Each quest shows its own roster.
 - Remembers rosters (with timestamps) per server in SQLite; `/history` looks back over past days.
-- Optional self-declared GW1 character names via `/ign` (a GW1 account has several; pick a favorite
-  to show next to your handle on the roster).
+- **Lookups + reminders** - `/zaishen when` finds the next day a quest is the daily, `/zaishen
+  upcoming` previews the coming days, and `/zaishen watch` DMs you when a quest you care about is up.
+- Optional self-declared GW1 character names via `/ign` (a GW1 account has several; pick a favorite,
+  with an optional profession, to show next to your handle on the roster).
 - No privileged intents, no message reading, no analytics - it only posts in one channel and manages
   its own message.
 
@@ -28,10 +30,14 @@ part of the project that runs in Discord; the website and deployment live elsewh
 
 | Command | Who | What |
 |---|---|---|
-| `/zaishen` | anyone | Show today's dailies (ephemeral) |
+| `/zaishen today` | anyone | Show today's dailies (ephemeral) |
+| `/zaishen when <quest>` | anyone | The next day a given quest/area is the daily |
+| `/zaishen upcoming [days]` | anyone | Preview the next few days (1-7, default 3) |
+| `/zaishen watch\|unwatch\|watching` | anyone | Opt in to a DM when a quest is the daily |
 | `/history show [days]` | anyone | Recent days' sign-ups in this server |
-| `/ign add\|remove\|favorite\|unfavorite\|who\|clear` | anyone | Register your GW1 character names; pick a favorite to show on the roster |
+| `/ign add\|remove\|favorite\|unfavorite\|profession\|who\|clear` | anyone | Register your GW1 character names (optional profession); pick a favorite to show on the roster |
 | `/setup #channel [role]` | admin | Choose the post channel + optional daily ping role |
+| `/config show` | admin | Show this server's settings |
 | `/enable` · `/disable` | admin | Resume / pause posting in this server |
 | `/history clear\|enable\|disable` | admin | Clear stored history / toggle keeping it |
 | `/adminrole [role]` | Manage Server | Let a role use the admin commands |

@@ -229,10 +229,10 @@ def test_ign_multi_add_remove(tmp_path):
     assert storage.add_ign(1, "Dervish McStab") == "added"
     assert storage.add_ign(1, "Mesmer Mary") == "added"
     assert storage.add_ign(1, "Dervish McStab") == "exists"  # no duplicates
-    assert {n for n, _f in storage.names_for(1)} == {"Dervish McStab", "Mesmer Mary"}
+    assert {n for n, _f, _p in storage.names_for(1)} == {"Dervish McStab", "Mesmer Mary"}
     assert storage.remove_ign(1, "Mesmer Mary") is True
     assert storage.remove_ign(1, "Mesmer Mary") is False  # already gone
-    assert {n for n, _f in storage.names_for(1)} == {"Dervish McStab"}
+    assert {n for n, _f, _p in storage.names_for(1)} == {"Dervish McStab"}
 
 
 def test_ign_favorite_drives_display(tmp_path):
@@ -242,14 +242,14 @@ def test_ign_favorite_drives_display(tmp_path):
     # no favorite set -> not displayed
     assert storage.favorite_name(1) is None
     assert storage.favorites_for([1]) == {}
-    # set a favorite -> that one displays
+    # set a favorite -> that one displays (as (name, profession))
     assert storage.set_favorite(1, "Mesmer Mary") is True
     assert storage.favorite_name(1) == "Mesmer Mary"
-    assert storage.favorites_for([1, 99]) == {1: "Mesmer Mary"}  # 99 has none -> absent
+    assert storage.favorites_for([1, 99]) == {1: ("Mesmer Mary", None)}  # 99 has none -> absent
     # switching favorite clears the old one (at most one)
     storage.set_favorite(1, "Dervish McStab")
     assert storage.favorite_name(1) == "Dervish McStab"
-    favs = dict(storage.names_for(1))
+    favs = {n: fav for n, fav, _p in storage.names_for(1)}
     assert favs == {"Dervish McStab": True, "Mesmer Mary": False}
     # can't favorite a name you don't have
     assert storage.set_favorite(1, "Nobody") is False
@@ -287,7 +287,7 @@ def test_ign_old_single_name_migrates_to_favorite(tmp_path):
     c.commit()
     c.close()
     storage.init(db, migrate=False)
-    assert storage.names_for(7) == [("Old Main", True)]  # migrated as the favorite
+    assert storage.names_for(7) == [("Old Main", True, None)]  # migrated as the favorite
     assert storage.favorite_name(7) == "Old Main"  # still shows on the roster (no regression)
 
 
@@ -297,3 +297,81 @@ def test_daily_recorded_for_history(tmp_path):
     rec = storage.dailies(ZDAY)
     assert rec == {qt: zaishen.quest_for(qt, date(2026, 6, 27)) for qt in QTS}
     assert rec["mission"] == "Blacktide Den"  # matches the verified schedule
+
+
+# ---- IGN professions -------------------------------------------------------
+def test_ign_profession(tmp_path):
+    fresh(tmp_path)
+    storage.add_ign(1, "Dervish McStab", "Dervish")
+    storage.add_ign(1, "Plain Jane")  # no profession
+    by_name = {n: p for n, _f, p in storage.names_for(1)}
+    assert by_name == {"Dervish McStab": "Dervish", "Plain Jane": None}
+    # favorite carries its profession through to the roster batch lookup
+    storage.set_favorite(1, "Dervish McStab")
+    assert storage.favorites_for([1]) == {1: ("Dervish McStab", "Dervish")}
+    # set + clear an existing name's profession; missing name returns False
+    assert storage.set_profession(1, "Plain Jane", "Monk") is True
+    assert {n: p for n, _f, p in storage.names_for(1)}["Plain Jane"] == "Monk"
+    assert storage.set_profession(1, "Plain Jane", None) is True
+    assert {n: p for n, _f, p in storage.names_for(1)}["Plain Jane"] is None
+    assert storage.set_profession(1, "Ghost", "Monk") is False
+
+
+# ---- quest watches ---------------------------------------------------------
+def test_watch_add_remove_list(tmp_path):
+    fresh(tmp_path)
+    assert storage.add_watch(1, "mission", "Thirsty River") == "added"
+    assert storage.add_watch(1, "mission", "Thirsty River") == "exists"
+    assert storage.add_watch(1, "vanquish", "Raisu Palace") == "added"
+    assert storage.watches_for(1) == [
+        ("mission", "Thirsty River"),
+        ("vanquish", "Raisu Palace"),
+    ]  # canonical quest order
+    assert storage.watches_for(2) == []  # per user
+    assert storage.remove_watch(1, "mission", "Thirsty River") is True
+    assert storage.remove_watch(1, "mission", "Thirsty River") is False
+    assert storage.clear_watches(1) == 1  # the Raisu Palace watch remained
+
+
+def test_watch_full_cap(tmp_path):
+    fresh(tmp_path)
+    names = zaishen.CYCLES["vanquish"]
+    for i in range(storage.MAX_WATCHES):
+        assert storage.add_watch(1, "vanquish", names[i]) == "added"
+    assert storage.add_watch(1, "vanquish", names[storage.MAX_WATCHES]) == "full"
+
+
+def test_watchers_for_day(tmp_path):
+    fresh(tmp_path)
+    day = date(2026, 6, 27)  # mission = Blacktide Den (verified)
+    storage.add_watch(1, "mission", "Blacktide Den")  # active that day
+    storage.add_watch(1, "bounty", "Urgoz")  # not active that day
+    storage.add_watch(2, "mission", "Augury Rock")  # not active that day
+    watchers = dict(storage.watchers_for_day(day))
+    assert watchers == {1: [("mission", "Blacktide Den")]}
+
+
+# ---- kv meta ---------------------------------------------------------------
+def test_meta_kv(tmp_path):
+    fresh(tmp_path)
+    assert storage.get_meta("x") is None
+    assert storage.get_meta("x", "def") == "def"
+    storage.set_meta("x", "1")
+    assert storage.get_meta("x") == "1"
+    storage.set_meta("x", "2")  # upsert
+    assert storage.get_meta("x") == "2"
+
+
+# ---- pre-migration backup --------------------------------------------------
+def test_pre_migration_backup(tmp_path):
+    db = str(tmp_path / "live.db")
+    storage.init(db, migrate=False)  # create a DB with some state
+    storage.add_ign(5, "Snapshot Me", "Ranger")
+    storage._conn.close()
+    # a migrate=True re-open snapshots the existing DB first
+    storage.init(db, migrate=True)
+    backups = sorted((tmp_path / "migration-backups").glob("live.db.*.bak"))
+    assert len(backups) == 1
+    snap = sqlite3.connect(str(backups[0]))
+    assert snap.execute("SELECT name FROM ign WHERE user_id=5").fetchone()[0] == "Snapshot Me"
+    snap.close()

@@ -18,10 +18,14 @@ Slash commands:
   /disable               - (admin) pause posting in this server (keeps config + data)
   /enable                - (admin) resume posting with the saved config
   /adminrole [role]      - (Manage Server) set/clear a role allowed to use the admin commands
-  /zaishen               - show today's Zaishen dailies (ephemeral; works anywhere)
+  /config show           - (admin) show this server's settings
+  /zaishen today         - show today's Zaishen dailies (ephemeral; works anywhere)
+  /zaishen when <quest>  - the next day a given quest is the daily
+  /zaishen upcoming [days] - preview the next few days
+  /zaishen watch|unwatch|watching - opt-in DM reminders when a quest is the daily
   /history show [days]   - recent days' sign-ups in this server (ephemeral)
   /history clear|enable|disable - (admin) clear stored history / toggle keeping it
-  /ign add|remove|favorite|unfavorite|who|clear - your GW1 character names (the favorite shows on the roster)
+  /ign add|remove|favorite|unfavorite|profession|who|clear - your GW1 character names (the favorite shows on the roster)
 
 This module wires Discord together; the pieces live in:
   config.py    - environment/config + shared constants
@@ -33,6 +37,7 @@ This module wires Discord together; the pieces live in:
 """
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
@@ -50,11 +55,21 @@ intents = (
 )  # needs the (non-privileged) guilds intent for join/remove events
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
-tree.add_command(commands.ign)  # /ign add | remove | favorite | unfavorite | who | clear
+tree.add_command(
+    commands.ign
+)  # /ign add | remove | favorite | unfavorite | profession | who | clear
 
 esc = discord.utils.escape_markdown
 QT_EMOJI = {qt: emoji for qt, emoji, _label in zaishen.QUEST_TYPES}
+QT_LABEL = {qt: label for qt, _emoji, label in zaishen.QUEST_TYPES}
 _loop_started = False
+
+
+def _reset_epoch(day):
+    """Unix timestamp of the 16:00 UTC reset that *starts* Zaishen day `day` (a date) - i.e. when
+    that day's quests go live. Used for Discord <t:...> timestamps in lookups."""
+    dt = datetime(day.year, day.month, day.day, zaishen.RESET_HOUR_UTC, tzinfo=timezone.utc)
+    return int(dt.timestamp())
 
 
 # ---- keep-at-bottom loop (per guild) ---------------------------------------
@@ -134,11 +149,49 @@ async def refresh_guild(gconf):
         print(f"guild {guild_id}: refresh error: {e!r}", flush=True)
 
 
+async def notify_watchers():
+    """Once per Zaishen day, DM each user whose watched quest (set via `/zaishen watch`) is today's
+    daily. The "already notified" marker is written BEFORE sending, so a restart never re-DMs everyone
+    (better to miss a late DM than to spam on a crash loop). DMs are best-effort - a user with DMs
+    closed is silently skipped."""
+    today = zaishen.zaishen_day()
+    today_iso = today.isoformat()
+    async with storage.lock:
+        if storage.get_meta("watch_notified_zday") == today_iso:
+            return
+        watchers = storage.watchers_for_day(today)
+        storage.set_meta("watch_notified_zday", today_iso)
+    if not watchers:
+        return
+    epoch = _reset_epoch(today)
+    for uid, quests in watchers:
+        try:
+            user = client.get_user(uid) or await client.fetch_user(uid)
+            lines = [
+                f"👋 A quest you're watching is **today's Zaishen daily** (resets <t:{epoch}:R>):"
+            ]
+            for qt, name in quests:
+                lines.append(
+                    f"{QT_EMOJI.get(qt, '•')} **{QT_LABEL.get(qt, qt)}:** "
+                    f"[{name}]({zaishen.wiki_url(name)})"
+                )
+            lines.append("-# From `/zaishen watch` - stop with `/zaishen unwatch`.")
+            await user.send("\n".join(lines), suppress_embeds=True)
+        except discord.Forbidden:
+            pass  # the user doesn't accept DMs - nothing we can do
+        except Exception as e:
+            print(f"watch DM to {uid} failed: {e!r}", flush=True)
+
+
 async def daily_loop():
     await client.wait_until_ready()
     while not client.is_closed():
         for gconf in storage.configured_guilds():
             await refresh_guild(gconf)
+        try:
+            await notify_watchers()
+        except Exception as e:
+            print(f"notify_watchers error: {e!r}", flush=True)
         await asyncio.sleep(max(15, config.CHECK_INTERVAL))
 
 
@@ -164,15 +217,166 @@ async def _deny_if_not_admin(interaction: discord.Interaction) -> bool:
     return True
 
 
-# ---- slash commands --------------------------------------------------------
-@tree.command(name="zaishen", description="Show today's Guild Wars Zaishen daily quests")
-async def zaishen_cmd(interaction: discord.Interaction):
+# ---- /zaishen group: look up + get reminded about the dailies ---------------
+zaishen_grp = app_commands.Group(
+    name="zaishen", description="Guild Wars 1 Zaishen daily quests - show, look up, get reminded"
+)
+
+
+async def _quest_name_autocomplete(interaction: discord.Interaction, current: str):
+    """Suggest any Zaishen quest/area name (for /zaishen when and /zaishen watch)."""
+    cur = current.lower()
+    return [
+        app_commands.Choice(name=n, value=n) for n in zaishen.all_quest_names() if cur in n.lower()
+    ][:25]
+
+
+async def _own_watch_autocomplete(interaction: discord.Interaction, current: str):
+    """Suggest the distinct quest names the invoker is currently watching (for /zaishen unwatch)."""
+    cur = current.lower()
+    seen = []
+    for _qt, name in storage.watches_for(interaction.user.id):
+        if name not in seen and cur in name.lower():
+            seen.append(name)
+    return [app_commands.Choice(name=n, value=n) for n in seen[:25]]
+
+
+@zaishen_grp.command(name="today", description="Show today's Guild Wars Zaishen daily quests")
+async def zaishen_today(interaction: discord.Interaction):
     await interaction.response.send_message(
         render.content(interaction.guild_id),
         ephemeral=True,
         suppress_embeds=True,
         allowed_mentions=NONE_MENTIONS,
     )
+
+
+@zaishen_grp.command(name="when", description="When is a given Zaishen quest next the daily?")
+@app_commands.describe(quest="The mission / bounty / arena / vanquish area to look up")
+@app_commands.autocomplete(quest=_quest_name_autocomplete)
+async def zaishen_when(interaction: discord.Interaction, quest: str):
+    matches = zaishen.types_with_quest(quest.strip())
+    if not matches:
+        await interaction.response.send_message(
+            f"I don't know a Zaishen quest called **{esc(quest.strip())}** - pick one from the "
+            "suggestions as you type.",
+            ephemeral=True,
+            allowed_mentions=NONE_MENTIONS,
+        )
+        return
+    today = zaishen.zaishen_day()
+    lines = []
+    for qt, emoji, label, canonical in matches:
+        day = zaishen.next_occurrence(qt, canonical, today)
+        link = f"[{canonical}]({zaishen.wiki_url(canonical)})"
+        if day == today:
+            lines.append(f"{emoji} **{label}:** {link} - it's **today**! 🎉")
+        else:
+            epoch = _reset_epoch(day)
+            lines.append(f"{emoji} **{label}:** {link} - <t:{epoch}:D> (<t:{epoch}:R>)")
+    await interaction.response.send_message(
+        "\n".join(lines), ephemeral=True, suppress_embeds=True, allowed_mentions=NONE_MENTIONS
+    )
+
+
+@zaishen_grp.command(name="upcoming", description="Preview the next few days of Zaishen dailies")
+@app_commands.describe(days="How many days ahead to show (1-7, default 3)")
+async def zaishen_upcoming(
+    interaction: discord.Interaction, days: app_commands.Range[int, 1, 7] = 3
+):
+    today = zaishen.zaishen_day()
+    blocks = []
+    for d in range(1, days + 1):
+        day = today + timedelta(days=d)
+        lines = [f"📅 **<t:{_reset_epoch(day)}:D>**"]
+        for qt, emoji, label, name in zaishen.all_quests(day):
+            lines.append(f"{emoji} **{label}:** [{name}]({zaishen.wiki_url(name)})")
+        blocks.append("\n".join(lines))
+    await interaction.response.send_message(
+        "\n\n".join(blocks), ephemeral=True, suppress_embeds=True, allowed_mentions=NONE_MENTIONS
+    )
+
+
+@zaishen_grp.command(name="watch", description="DM me when a quest is the daily")
+@app_commands.describe(quest="The quest/area to be reminded about (covers every cycle it's in)")
+@app_commands.autocomplete(quest=_quest_name_autocomplete)
+async def zaishen_watch(interaction: discord.Interaction, quest: str):
+    matches = zaishen.types_with_quest(quest.strip())
+    if not matches:
+        await interaction.response.send_message(
+            f"I don't know a Zaishen quest called **{esc(quest.strip())}** - pick one from the "
+            "suggestions as you type.",
+            ephemeral=True,
+            allowed_mentions=NONE_MENTIONS,
+        )
+        return
+    canonical = matches[0][3]
+    added = existed = 0
+    full = False
+    async with storage.lock:
+        for qt, _emoji, _label, name in matches:
+            res = storage.add_watch(interaction.user.id, qt, name)
+            if res == "added":
+                added += 1
+            elif res == "exists":
+                existed += 1
+            elif res == "full":
+                full = True
+                break
+    if full:
+        msg = (
+            f"You're watching the maximum of {storage.MAX_WATCHES} quests - "
+            "remove some with `/zaishen unwatch` first."
+        )
+    elif added:
+        types = ", ".join(label for _qt, _e, label, _n in matches)
+        msg = (
+            f"🔔 Watching **{esc(canonical)}** ({types}). I'll DM you when it's the daily.\n"
+            "-# Make sure you allow DMs from server members, or I can't reach you."
+        )
+    else:
+        msg = f"You're already watching **{esc(canonical)}**."
+    await interaction.response.send_message(msg, ephemeral=True, allowed_mentions=NONE_MENTIONS)
+
+
+@zaishen_grp.command(name="unwatch", description="Stop being reminded about a quest")
+@app_commands.describe(quest="A quest you're currently watching")
+@app_commands.autocomplete(quest=_own_watch_autocomplete)
+async def zaishen_unwatch(interaction: discord.Interaction, quest: str):
+    name = quest.strip()
+    removed = 0
+    async with storage.lock:
+        for qt, _emoji, _label, canonical in zaishen.types_with_quest(name):
+            if storage.remove_watch(interaction.user.id, qt, canonical):
+                removed += 1
+    await interaction.response.send_message(
+        f"🔕 Stopped watching **{esc(name)}**."
+        if removed
+        else f"You weren't watching **{esc(name)}**.",
+        ephemeral=True,
+        allowed_mentions=NONE_MENTIONS,
+    )
+
+
+@zaishen_grp.command(name="watching", description="List the quests you're watching")
+async def zaishen_watching(interaction: discord.Interaction):
+    watches = storage.watches_for(interaction.user.id)
+    if not watches:
+        await interaction.response.send_message(
+            "You're not watching any quests yet - add one with `/zaishen watch`.",
+            ephemeral=True,
+        )
+        return
+    lines = [
+        f"{QT_EMOJI.get(qt, '•')} **{QT_LABEL.get(qt, qt)}:** {esc(name)}" for qt, name in watches
+    ]
+    view = PagedList(interaction.user.id, lines, title=f"You're watching ({len(watches)})")
+    await interaction.response.send_message(
+        view.content(), view=view, ephemeral=True, allowed_mentions=NONE_MENTIONS
+    )
+
+
+tree.add_command(zaishen_grp)
 
 
 @tree.command(name="setup", description="Choose the channel for the daily Zaishen message (admin)")
@@ -395,6 +599,40 @@ async def history_disable(interaction: discord.Interaction):
 tree.add_command(history)
 
 
+# ---- /config group ---------------------------------------------------------
+config_grp = app_commands.Group(
+    name="config", description="This server's GW Zaishen settings", guild_only=True
+)
+
+
+@config_grp.command(name="show", description="Show this server's bot configuration (admin)")
+async def config_show(interaction: discord.Interaction):
+    if await _deny_if_not_admin(interaction):
+        return
+    gc = storage.get_guild_config(interaction.guild_id)
+    if not gc or gc["channel_id"] is None:
+        await interaction.response.send_message(
+            "This server isn't set up yet - run `/setup #channel` first.", ephemeral=True
+        )
+        return
+    ping = f"<@&{gc['ping_role_id']}>" if gc["ping_role_id"] else "_none_"
+    admin = f"<@&{gc['admin_role_id']}>" if gc["admin_role_id"] else "_Manage Server only_"
+    lines = [
+        "**This server's GW Zaishen settings**",
+        f"• Channel: <#{gc['channel_id']}>",
+        f"• Daily ping role: {ping}",
+        f"• Bot-admin role: {admin}",
+        f"• Status: {'✅ posting' if gc['enabled'] else '⏸️ paused (use `/enable`)'}",
+        f"• Sign-up history: {'kept' if gc['keep_history'] else 'not kept (purged each reset)'}",
+    ]
+    await interaction.response.send_message(
+        "\n".join(lines), ephemeral=True, allowed_mentions=NONE_MENTIONS
+    )
+
+
+tree.add_command(config_grp)
+
+
 # ---- guild lifecycle -------------------------------------------------------
 @client.event
 async def on_guild_join(guild: discord.Guild):
@@ -408,9 +646,10 @@ async def on_guild_join(guild: discord.Guild):
     if target:
         try:
             await target.send(
-                "👋 Thanks for adding **GW1 Zaishen Bot**!\n"
+                "👋 Thanks for adding **GW Zaishen**!\n"
                 "An admin: run `/setup #channel` to choose where I post the daily Zaishen quests "
-                "(optionally with a role to ping at each reset).",
+                "(optionally with a role to ping at each reset). Anyone can use `/zaishen today`, "
+                "`/zaishen when`, and `/zaishen watch` for DM reminders.",
                 allowed_mentions=NONE_MENTIONS,
             )
         except Exception:

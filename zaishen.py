@@ -26,6 +26,20 @@ RESET_HOUR_UTC = 16  # quests change daily at 16:00 UTC (fixed, no DST)
 EPOCH = date(2026, 6, 23)
 ANCHOR = {"mission": 2, "bounty": 17, "combat": 12, "vanquish": 15}
 
+# The ten Guild Wars 1 professions - the optional class shown next to a character name on the roster.
+PROFESSIONS = [
+    "Warrior",
+    "Ranger",
+    "Monk",
+    "Necromancer",
+    "Mesmer",
+    "Elementalist",
+    "Assassin",
+    "Ritualist",
+    "Paragon",
+    "Dervish",
+]
+
 # Human labels + emoji for each quest type, in display order.
 QUEST_TYPES = [
     ("mission", "🗺️", "Zaishen Mission"),
@@ -357,6 +371,39 @@ def all_quests(day=None):
     if day is None:
         day = zaishen_day()
     return [(qt, emoji, label, CYCLES[qt][index_for(qt, day)]) for qt, emoji, label in QUEST_TYPES]
+
+
+def next_occurrence(qtype, name, on_or_after=None):
+    """The next Zaishen day (a date()) on or after `on_or_after` (default: today) on which `qtype`'s
+    active quest is `name`. Returns None if `name` isn't in that cycle. Scans at most one full cycle,
+    since the rotation advances +1 index per day and repeats with the cycle length."""
+    if on_or_after is None:
+        on_or_after = zaishen_day()
+    cyc = CYCLES[qtype]
+    nl = name.casefold()
+    for offset in range(len(cyc)):
+        day = on_or_after + timedelta(days=offset)
+        if cyc[index_for(qtype, day)].casefold() == nl:
+            return day
+    return None
+
+
+def types_with_quest(name):
+    """The quest types whose cycle contains `name` (case-insensitive). A single area can appear in
+    more than one cycle - e.g. Raisu Palace is both a Mission and a Vanquish - so this returns a list
+    of (qtype, emoji, label, canonical_name) in display order."""
+    nl = name.casefold()
+    out = []
+    for qt, emoji, label in QUEST_TYPES:
+        match = next((q for q in CYCLES[qt] if q.casefold() == nl), None)
+        if match:
+            out.append((qt, emoji, label, match))
+    return out
+
+
+def all_quest_names():
+    """Every distinct quest/area name across all four cycles, sorted (for command autocomplete)."""
+    return sorted({q for cyc in CYCLES.values() for q in cyc}, key=str.casefold)
 
 
 def wiki_url(name):

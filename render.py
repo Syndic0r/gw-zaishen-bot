@@ -18,10 +18,16 @@ def content(guild_id=None):
     igns = storage.favorites_for({u for ups in signs.values() for u in ups})
 
     def who(uid):
-        name = igns.get(uid)  # the user's favorite character name, or None -> handle only
+        fav = igns.get(uid)  # (favorite character name, profession_or_None), or None -> handle only
+        if not fav:
+            return f"<@{uid}>"
+        name, prof = fav
         # escape the user-supplied IGN so markdown in it can't distort the roster; the message is
         # sent with allowed_mentions=none, so any mention-like text in it never pings either.
-        return f"<@{uid}> ({discord.utils.escape_markdown(name)})" if name else f"<@{uid}>"
+        label = discord.utils.escape_markdown(name)
+        if prof:
+            label += f", {prof}"
+        return f"<@{uid}> ({label})"
 
     lines = [
         "# ⚔️ Guild Wars - Zaishen Dailies",

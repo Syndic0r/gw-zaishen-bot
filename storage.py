@@ -10,8 +10,12 @@ Tables:
   pinned(guild_id, message_id, zday)         the current pinned message, per server
   daily(zday, quest_type, quest_name)        each day's computed quests, recorded for history (global)
   signup(guild_id, zday, quest_type, user_id, signed_up_at)  who's up for which quest, per server
-  ign(user_id, name, favorite, set_at)       self-declared GW1 character names (global, per user;
-                                             a user can have several, with at most one favorite)
+  ign(user_id, name, favorite, profession, set_at)  self-declared GW1 character names (global, per
+                                             user; several allowed, at most one favorite, optional
+                                             profession)
+  watch(user_id, quest_type, quest_name, created_at)  opt-in DM reminders when a quest is the daily
+                                             (global, per user - a player's interest is server-agnostic)
+  kv(key, value)                             tiny key/value store for bot-internal bookkeeping
 
 `zaishen.py` stays the source of truth for *computing* dailies; `daily` is a recorded copy so the
 schedule + signups can be queried/joined and kept as history. Signups are NOT deleted at the daily
@@ -21,7 +25,9 @@ stay consistent with the keep-at-bottom loop. SQLite calls are synchronous but t
 """
 
 import asyncio
+import glob
 import json
+import os
 import sqlite3
 from datetime import date, datetime, timezone
 
@@ -61,11 +67,23 @@ CREATE TABLE IF NOT EXISTS signup (
     PRIMARY KEY (guild_id, zday, quest_type, user_id)
 );
 CREATE TABLE IF NOT EXISTS ign (
-    user_id  INTEGER NOT NULL,
-    name     TEXT    NOT NULL,
-    favorite INTEGER NOT NULL DEFAULT 0,  -- the one shown on the roster (at most one set per user)
-    set_at   TEXT    NOT NULL,
+    user_id    INTEGER NOT NULL,
+    name       TEXT    NOT NULL,
+    favorite   INTEGER NOT NULL DEFAULT 0,  -- the one shown on the roster (at most one set per user)
+    profession TEXT,                        -- optional GW1 profession shown next to the name
+    set_at     TEXT    NOT NULL,
     PRIMARY KEY (user_id, name)
+);
+CREATE TABLE IF NOT EXISTS watch (
+    user_id    INTEGER NOT NULL,
+    quest_type TEXT    NOT NULL,
+    quest_name TEXT    NOT NULL,
+    created_at TEXT    NOT NULL,
+    PRIMARY KEY (user_id, quest_type, quest_name)
+);
+CREATE TABLE IF NOT EXISTS kv (
+    key   TEXT PRIMARY KEY,
+    value TEXT
 );
 """
 
@@ -80,12 +98,46 @@ def _db():
     return _conn
 
 
+def _pre_migration_backup(db_path, keep=10):
+    """Snapshot the existing DB right before opening it (and possibly altering its schema), so a
+    botched migration is always recoverable. Writes a consistent copy via SQLite's backup API (safe
+    even with a WAL) into a `migration-backups/` dir beside the DB, keeping the newest `keep`.
+    Best-effort: a failure here is logged but never blocks startup - the hourly off-disk backup is
+    the primary safety net; this is the belt-and-braces local copy at the exact pre-migration moment."""
+    if not os.path.exists(db_path):
+        return  # fresh install - nothing to snapshot yet
+    base = os.path.basename(db_path)
+    backup_dir = os.path.join(os.path.dirname(os.path.abspath(db_path)), "migration-backups")
+    try:
+        os.makedirs(backup_dir, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        dest = os.path.join(backup_dir, f"{base}.{ts}.bak")
+        src = sqlite3.connect(db_path)
+        try:
+            with sqlite3.connect(dest) as snap:
+                src.backup(snap)
+        finally:
+            src.close()
+        snaps = sorted(glob.glob(os.path.join(backup_dir, f"{base}.*.bak")))
+        for old in snaps[:-keep]:  # rotate: drop all but the newest `keep`
+            try:
+                os.remove(old)
+            except OSError:
+                pass
+        print(f"pre-migration DB snapshot -> {dest}", flush=True)
+    except Exception as e:
+        print(f"pre-migration backup skipped ({e!r})", flush=True)
+
+
 def init(db_path=None, migrate=True):
     """Open the DB (creating tables) - call once on startup. Tests pass a temp path + migrate=False."""
     global _conn
     if _conn is not None:
         _conn.close()
-    _conn = sqlite3.connect(db_path or config.DB_FILE)
+    path = db_path or config.DB_FILE
+    if migrate:
+        _pre_migration_backup(path)  # snapshot the existing DB before any schema change runs
+    _conn = sqlite3.connect(path)
     _conn.row_factory = sqlite3.Row
     _conn.execute("PRAGMA journal_mode=WAL")
     _stash_single_tenant()  # rename old single-server tables aside (if any) BEFORE recreating them
@@ -127,6 +179,10 @@ def _ensure_columns():
         _db().execute("ALTER TABLE guild_config ADD COLUMN keep_history INTEGER NOT NULL DEFAULT 1")
     if "admin_role_id" not in cols:
         _db().execute("ALTER TABLE guild_config ADD COLUMN admin_role_id INTEGER")
+    # ign gained an optional `profession` column after the multi-name migration shipped
+    icols = _cols("ign")
+    if icols and "profession" not in icols:
+        _db().execute("ALTER TABLE ign ADD COLUMN profession TEXT")
 
 
 def _stash_single_tenant():
@@ -494,19 +550,30 @@ def signup_history(guild_id, limit_days=7):
 # ---- IGN (self-declared GW1 character names; global per user) --------------
 # A user can register several character names; at most one is the "favorite", which is the only one
 # shown next to their handle on the roster. No favorite -> nothing is shown.
-def add_ign(uid, name):
-    """Add a character name for a user (caller holds `lock`). Does NOT auto-favorite. Returns
-    "added", "exists" (already had that name), or "full" (hit MAX_IGNS)."""
+def add_ign(uid, name, profession=None):
+    """Add a character name for a user (caller holds `lock`), with an optional profession. Does NOT
+    auto-favorite. Returns "added", "exists" (already had that name), or "full" (hit MAX_IGNS)."""
     if _db().execute("SELECT 1 FROM ign WHERE user_id = ? AND name = ?", (uid, name)).fetchone():
         return "exists"
     count = _db().execute("SELECT COUNT(*) c FROM ign WHERE user_id = ?", (uid,)).fetchone()["c"]
     if count >= MAX_IGNS:
         return "full"
     _db().execute(
-        "INSERT INTO ign(user_id, name, favorite, set_at) VALUES (?, ?, 0, ?)", (uid, name, _now())
+        "INSERT INTO ign(user_id, name, favorite, profession, set_at) VALUES (?, ?, 0, ?, ?)",
+        (uid, name, profession, _now()),
     )
     _db().commit()
     return "added"
+
+
+def set_profession(uid, name, profession):
+    """Set (profession) or clear (None) the profession on one of a user's names (caller holds
+    `lock`). Returns False if the user doesn't have that name."""
+    cur = _db().execute(
+        "UPDATE ign SET profession = ? WHERE user_id = ? AND name = ?", (profession, uid, name)
+    )
+    _db().commit()
+    return cur.rowcount > 0
 
 
 def remove_ign(uid, name):
@@ -547,11 +614,13 @@ def clear_igns(uid):
 
 
 def names_for(uid):
-    """A user's character names as [(name, is_favorite_bool), ...], favorite first then by name."""
+    """A user's character names as [(name, is_favorite_bool, profession_or_None), ...], favorite
+    first then by name."""
     return [
-        (r["name"], bool(r["favorite"]))
+        (r["name"], bool(r["favorite"]), r["profession"])
         for r in _db().execute(
-            "SELECT name, favorite FROM ign WHERE user_id = ? ORDER BY favorite DESC, name COLLATE NOCASE",
+            "SELECT name, favorite, profession FROM ign WHERE user_id = ? "
+            "ORDER BY favorite DESC, name COLLATE NOCASE",
             (uid,),
         )
     ]
@@ -566,15 +635,98 @@ def favorite_name(uid):
 
 
 def favorites_for(uids):
-    """Batch: {user_id: favorite_name} for the given users that have a favorite set (for the roster)."""
+    """Batch: {user_id: (favorite_name, profession_or_None)} for the users that have a favorite set
+    (for the roster). profession is None when the favorite character has no profession recorded."""
     uids = list(uids)
     if not uids:
         return {}
     placeholders = ",".join("?" * len(uids))
     return {
-        r["user_id"]: r["name"]
+        r["user_id"]: (r["name"], r["profession"])
         for r in _db().execute(
-            f"SELECT user_id, name FROM ign WHERE favorite = 1 AND user_id IN ({placeholders})",
+            f"SELECT user_id, name, profession FROM ign "
+            f"WHERE favorite = 1 AND user_id IN ({placeholders})",
             uids,
         )
     }
+
+
+# ---- quest watches (opt-in DM reminders; global per user) -------------------
+MAX_WATCHES = 25  # cap a user's watch list (and its autocomplete) to keep things sane
+
+
+def add_watch(uid, quest_type, quest_name):
+    """Add a quest watch for a user (caller holds `lock`). Returns "added", "exists", or "full"."""
+    if (
+        _db()
+        .execute(
+            "SELECT 1 FROM watch WHERE user_id = ? AND quest_type = ? AND quest_name = ?",
+            (uid, quest_type, quest_name),
+        )
+        .fetchone()
+    ):
+        return "exists"
+    count = _db().execute("SELECT COUNT(*) c FROM watch WHERE user_id = ?", (uid,)).fetchone()["c"]
+    if count >= MAX_WATCHES:
+        return "full"
+    _db().execute(
+        "INSERT INTO watch(user_id, quest_type, quest_name, created_at) VALUES (?, ?, ?, ?)",
+        (uid, quest_type, quest_name, _now()),
+    )
+    _db().commit()
+    return "added"
+
+
+def remove_watch(uid, quest_type, quest_name):
+    """Remove one of a user's watches (caller holds `lock`). Returns True if it existed."""
+    cur = _db().execute(
+        "DELETE FROM watch WHERE user_id = ? AND quest_type = ? AND quest_name = ?",
+        (uid, quest_type, quest_name),
+    )
+    _db().commit()
+    return cur.rowcount > 0
+
+
+def clear_watches(uid):
+    """Remove ALL of a user's watches (caller holds `lock`). Returns how many were removed."""
+    cur = _db().execute("DELETE FROM watch WHERE user_id = ?", (uid,))
+    _db().commit()
+    return cur.rowcount
+
+
+def watches_for(uid):
+    """A user's watches as [(quest_type, quest_name), ...], in canonical quest order then by name."""
+    order = {qt: i for i, (qt, _e, _l) in enumerate(zaishen.QUEST_TYPES)}
+    rows = [
+        (r["quest_type"], r["quest_name"])
+        for r in _db().execute("SELECT quest_type, quest_name FROM watch WHERE user_id = ?", (uid,))
+    ]
+    return sorted(rows, key=lambda r: (order.get(r[0], 99), r[1].casefold()))
+
+
+def watchers_for_day(day):
+    """[(user_id, [(quest_type, quest_name), ...]), ...] for users whose watched quest is active on
+    `day`. Used to DM opt-in reminders once per Zaishen day."""
+    active = {(qt, nm) for qt, _e, _l, nm in zaishen.all_quests(day)}
+    by_user = {}
+    for r in _db().execute("SELECT user_id, quest_type, quest_name FROM watch"):
+        key = (r["quest_type"], r["quest_name"])
+        if key in active:
+            by_user.setdefault(r["user_id"], []).append(key)
+    return list(by_user.items())
+
+
+# ---- tiny key/value store (bot-internal bookkeeping) -----------------------
+def get_meta(key, default=None):
+    row = _db().execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_meta(key, value):
+    """Set a key/value pair (caller holds `lock`)."""
+    _db().execute(
+        "INSERT INTO kv(key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    _db().commit()
