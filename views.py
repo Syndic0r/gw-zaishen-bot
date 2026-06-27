@@ -96,7 +96,7 @@ class ZaishenView(discord.ui.View):
                 zday = zaishen.zaishen_day().isoformat()
                 storage.ensure_daily(zday)
                 storage.toggle(interaction.guild_id, zday, quest_type, interaction.user.id)
-            await self._refresh(interaction)
+            await self._rerender(interaction)
 
         return cb
 
@@ -105,15 +105,18 @@ class ZaishenView(discord.ui.View):
             zday = zaishen.zaishen_day().isoformat()
             storage.ensure_daily(zday)
             storage.sign_all(interaction.guild_id, zday, interaction.user.id)
-        await self._refresh(interaction)
+        await self._rerender(interaction)
 
     async def _offall_cb(self, interaction: discord.Interaction):
         async with storage.lock:
             zday = zaishen.zaishen_day().isoformat()
             storage.sign_off_all(interaction.guild_id, zday, interaction.user.id)
-        await self._refresh(interaction)
+        await self._rerender(interaction)
 
-    async def _refresh(self, interaction: discord.Interaction):
+    async def _rerender(self, interaction: discord.Interaction):
+        # NB: named `_rerender`, not `_refresh` - discord.ui.View has an internal `_refresh()` that it
+        # calls during component handling; overriding that name shadowed it (caused a "coroutine never
+        # awaited" warning and broke discord's own view refresh).
         # Render fresh AFTER releasing the lock (render reads state synchronously, so it reflects
         # other people's near-simultaneous clicks) and edit in place - this also acks the click.
         try:
