@@ -670,17 +670,22 @@ async def on_ready():
     storage.init()
     client.add_view(ZaishenView())  # re-attach persistent buttons after a restart
 
-    # Global sync (works in every server; ~1h to propagate). If a dev/home guild is configured, also
-    # copy the commands there for INSTANT updates while iterating.
+    # Sync commands GLOBALLY only (works in every server; ~1h to propagate). This already covers
+    # every guild, including the home guild. We must NOT also copy the commands into a specific guild
+    # (the old `copy_global_to` + guild sync) - that registers a SECOND, guild-scoped copy, so Discord
+    # shows every command TWICE in that guild. If a home guild is configured, clear any such leftover
+    # guild-scoped copies so only the (authoritative) global set remains.
     try:
         synced = await tree.sync()
         print(f"Synced {len(synced)} GLOBAL command(s) (may take ~1h to appear)", flush=True)
         if config.GUILD_ID:
             guild = discord.Object(id=int(config.GUILD_ID))
-            tree.copy_global_to(guild=guild)
-            g = await tree.sync(guild=guild)
+            tree.clear_commands(guild=guild)
+            cleared = await tree.sync(guild=guild)
             print(
-                f"Synced {len(g)} command(s) to dev guild {config.GUILD_ID} (instant)", flush=True
+                f"Cleared guild-scoped command copies in guild {config.GUILD_ID} "
+                f"(now {len(cleared)} guild commands; global set is authoritative)",
+                flush=True,
             )
     except Exception as e:
         print(f"COMMAND SYNC ERROR: {e!r}", flush=True)
