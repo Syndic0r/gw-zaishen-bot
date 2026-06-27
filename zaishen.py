@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Guild Wars 1 Zaishen daily-quest rotation — pure, dependency-free, testable.
+Guild Wars 1 Zaishen daily-quest rotation - pure, dependency-free, testable.
 
 The four Zaishen Challenge Quests rotate on fixed cycles and change once a day at **16:00 UTC**
 (fixed year-round; GW1 does not observe DST). A "Zaishen day" therefore runs from one 16:00 UTC to
@@ -12,7 +12,7 @@ Each cycle advances exactly +1 index per Zaishen day. The active index is:
 
 where days_since_epoch is counted in Zaishen days from EPOCH. EPOCH + ANCHOR were taken from the
 official Guild Wars Wiki schedule and validated against 8 consecutive dated days
-(2026-06-23 … 2026-06-30) for all four cycles — see tests/test_zaishen.py.
+(2026-06-23 … 2026-06-30) for all four cycles - see tests/test_zaishen.py.
 
 Sources: https://wiki.guildwars.com/wiki/Zaishen_Challenge_Quests and the per-quest /cycles pages.
 """
@@ -35,7 +35,7 @@ QUEST_TYPES = [
 ]
 
 # Full ordered rotation lists (verbatim from wiki.guildwars.com). Combat deliberately repeats modes
-# within its 28-day cycle — store the full list; never dedupe or use list.index() to find the offset.
+# within its 28-day cycle - store the full list; never dedupe or use list.index() to find the offset.
 CYCLES = {
     "mission": [
         "Augury Rock",

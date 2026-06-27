@@ -1,4 +1,4 @@
-"""Storage layer tests — per-guild signups, config, history, migration, against a temp SQLite DB."""
+"""Storage layer tests - per-guild signups, config, history, migration, against a temp SQLite DB."""
 
 import sqlite3
 from datetime import date
@@ -43,7 +43,7 @@ def test_sign_all_and_off_all(tmp_path):
     storage.sign_all(G1, ZDAY, 7)
     for qt in QTS:
         assert 7 in storage.signups(G1, ZDAY)[qt]
-    storage.sign_all(G1, ZDAY, 7)  # idempotent — no duplicates / errors
+    storage.sign_all(G1, ZDAY, 7)  # idempotent - no duplicates / errors
     assert storage.signups(G1, ZDAY)["mission"] == [7]
     storage.toggle(G1, ZDAY, "vanquish", 8)  # someone else on one quest
     storage.sign_off_all(G1, ZDAY, 7)
@@ -98,7 +98,7 @@ def test_disable_enable_and_delete_guild(tmp_path):
 
 def test_admin_role(tmp_path):
     fresh(tmp_path)
-    # works even before /setup — upserts a config row
+    # works even before /setup - upserts a config row
     storage.set_admin_role(G1, 4242)
     assert storage.get_guild_config(G1)["admin_role_id"] == 4242
     storage.set_guild_config(G1, 100, None)  # later /setup keeps the admin role
@@ -136,7 +136,7 @@ def test_signup_history(tmp_path):
     storage.ensure_daily("2026-06-27")
     storage.toggle(G1, "2026-06-26", "mission", 7)
     storage.toggle(G1, "2026-06-27", "combat", 8)
-    storage.toggle(G2, "2026-06-27", "combat", 9)  # other guild — excluded
+    storage.toggle(G2, "2026-06-27", "combat", 9)  # other guild - excluded
     hist = storage.signup_history(G1, 7)
     assert [z for z, _ in hist] == ["2026-06-27", "2026-06-26"]  # newest first
     d27 = {qt: ups for qt, _name, ups in hist[0][1]}

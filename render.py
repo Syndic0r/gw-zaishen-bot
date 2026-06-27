@@ -7,7 +7,7 @@ import zaishen
 
 
 def content(guild_id=None):
-    """The daily message body — header + each quest (wiki-linked) with who's up for it.
+    """The daily message body - header + each quest (wiki-linked) with who's up for it.
 
     With a `guild_id`, the per-server roster + the sign-up footer are shown (the pinned message, and
     `/zaishen` used in a server). Without one (e.g. `/zaishen` in a DM), only the quests are shown."""
@@ -24,7 +24,7 @@ def content(guild_id=None):
         return f"<@{uid}> ({discord.utils.escape_markdown(name)})" if name else f"<@{uid}>"
 
     lines = [
-        "# ⚔️ Guild Wars — Zaishen Dailies",
+        "# ⚔️ Guild Wars - Zaishen Dailies",
         f"📅 **<t:{reset_epoch - 86400}:D>** · next reset <t:{reset_epoch}:R>",
         "",
     ]

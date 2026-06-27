@@ -1,4 +1,4 @@
-# secrets / runtime state — never commit
+# secrets / runtime state - never commit
 *.conf
 state.json
 gw1.db

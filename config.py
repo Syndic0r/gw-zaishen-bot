@@ -8,7 +8,7 @@ The bot is multi-tenant: each server picks its channel + optional ping role in-a
 to (a) migrate the original single-server deployment into the DB and (b) speed up dev command sync.
 
   DISCORD_BOT_TOKEN            (required)  bot token from the Discord Developer Portal
-  DISCORD_GUILD_ID             (optional)  a dev/home server ID — gives INSTANT slash-command sync
+  DISCORD_GUILD_ID             (optional)  a dev/home server ID - gives INSTANT slash-command sync
                                            there, and tells the migration which guild the pre-existing
                                            single-server rows belong to
   DISCORD_ZAISHEN_CHANNEL_ID   (optional)  legacy: the original single-server channel, used once to
@@ -40,7 +40,7 @@ CHECK_INTERVAL = _int_env("CHECK_INTERVAL", 60)
 DB_FILE = os.environ.get("BOT_DB_FILE", "").strip() or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "gw1.db"
 )
-# legacy JSON state — read once on first SQLite startup to migrate the pinned message id
+# legacy JSON state - read once on first SQLite startup to migrate the pinned message id
 STATE_FILE = os.environ.get("BOT_STATE_FILE", "").strip() or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "state.json"
 )

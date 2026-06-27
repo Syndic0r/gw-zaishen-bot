@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Guild Wars 1 Zaishen daily-quest Discord bot — entrypoint.
+Guild Wars 1 Zaishen daily-quest Discord bot - entrypoint.
 
 Multi-tenant: serves many Discord servers at once. Each server's admin runs `/setup #channel` to
 choose where the daily message goes (and an optional ping role). The bot posts today's four Zaishen
@@ -14,22 +14,22 @@ notified once).
 Admin commands accept either the Manage Server permission or a per-server bot-admin role (/adminrole).
 
 Slash commands:
-  /setup #channel [role] — (admin) choose where to post + optional daily ping role
-  /disable               — (admin) pause posting in this server (keeps config + data)
-  /enable                — (admin) resume posting with the saved config
-  /adminrole [role]      — (Manage Server) set/clear a role allowed to use the admin commands
-  /zaishen               — show today's Zaishen dailies (ephemeral; works anywhere)
-  /history show [days]   — recent days' sign-ups in this server (ephemeral)
-  /history clear|enable|disable — (admin) clear stored history / toggle keeping it
-  /ign set|who|clear|list — link your Discord to your GW1 character name (shown on the roster)
+  /setup #channel [role] - (admin) choose where to post + optional daily ping role
+  /disable               - (admin) pause posting in this server (keeps config + data)
+  /enable                - (admin) resume posting with the saved config
+  /adminrole [role]      - (Manage Server) set/clear a role allowed to use the admin commands
+  /zaishen               - show today's Zaishen dailies (ephemeral; works anywhere)
+  /history show [days]   - recent days' sign-ups in this server (ephemeral)
+  /history clear|enable|disable - (admin) clear stored history / toggle keeping it
+  /ign set|who|clear|list - link your Discord to your GW1 character name (shown on the roster)
 
 This module wires Discord together; the pieces live in:
-  config.py    — environment/config + shared constants
-  zaishen.py   — the rotation domain (which quests are active)
-  storage.py   — persistence (per-guild config, message, per-quest signups, IGNs)
-  render.py    — the message text
-  views.py     — the buttons + the paged-list helper
-  commands.py  — the /ign command group
+  config.py    - environment/config + shared constants
+  zaishen.py   - the rotation domain (which quests are active)
+  storage.py   - persistence (per-guild config, message, per-quest signups, IGNs)
+  render.py    - the message text
+  views.py     - the buttons + the paged-list helper
+  commands.py  - the /ign command group
 """
 
 import asyncio
@@ -83,7 +83,7 @@ async def refresh_guild(gconf):
         print(f"guild {guild_id}: channel error: {e!r}", flush=True)
         return
 
-    # Snapshot + handle the daily rollover under the lock — but do NO network here, so a button click
+    # Snapshot + handle the daily rollover under the lock - but do NO network here, so a button click
     # (same lock) is never blocked on Discord I/O and can't hit the 3s interaction deadline.
     async with storage.lock:
         new_day, mid, first_ever = storage.begin_day_rollover(guild_id)
@@ -91,7 +91,7 @@ async def refresh_guild(gconf):
     content = render.content(guild_id)  # synchronous read of the latest roster
     view = ZaishenView()
 
-    # is our message still the last one in the channel? (network — lock NOT held)
+    # is our message still the last one in the channel? (network - lock NOT held)
     last = None
     try:
         async for m in ch.history(limit=1):
@@ -119,7 +119,7 @@ async def refresh_guild(gconf):
                     await (await ch.fetch_message(mid)).delete()
                 except Exception:
                     pass
-            # ping the role on a genuine daily rollover — never on the guild's first-ever post
+            # ping the role on a genuine daily rollover - never on the guild's first-ever post
             do_ping = bool(new_day and not first_ever and ping_role_id)
             mentions = ROLE_MENTIONS if do_ping else NONE_MENTIONS
             body = (f"<@&{ping_role_id}>\n" if do_ping else "") + content
@@ -209,7 +209,7 @@ async def setup_cmd(
             interaction.guild_id, channel.id, ping_role.id if ping_role else None
         )
     await interaction.response.send_message(
-        f"✅ Set up — I'll post the daily Zaishen quests in {channel.mention}"
+        f"✅ Set up - I'll post the daily Zaishen quests in {channel.mention}"
         + (f" and ping {ping_role.mention} at each daily reset." if ping_role else ".")
         + " It'll appear in a moment.",
         ephemeral=True,
@@ -260,7 +260,7 @@ async def enable_cmd(interaction: discord.Interaction):
         gconf = storage.get_guild_config(interaction.guild_id)
     if status == "absent":
         await interaction.response.send_message(
-            "This server isn't set up yet — run `/setup #channel` first.", ephemeral=True
+            "This server isn't set up yet - run `/setup #channel` first.", ephemeral=True
         )
         return
     if status == "already":
@@ -269,7 +269,7 @@ async def enable_cmd(interaction: discord.Interaction):
         )
         return
     await interaction.response.send_message(
-        "▶️ Resumed — the daily Zaishen message will reappear in a moment.",
+        "▶️ Resumed - the daily Zaishen message will reappear in a moment.",
         ephemeral=True,
         allowed_mentions=NONE_MENTIONS,
     )
@@ -282,17 +282,17 @@ async def enable_cmd(interaction: discord.Interaction):
 @tree.command(
     name="adminrole", description="Set a role allowed to manage me (besides Manage Server)"
 )
-@app_commands.describe(role="Role that may run my admin commands — leave empty to clear it")
+@app_commands.describe(role="Role that may run my admin commands - leave empty to clear it")
 @app_commands.default_permissions(manage_guild=True)
 @app_commands.guild_only()
 async def adminrole_cmd(interaction: discord.Interaction, role: discord.Role = None):
-    # only true server admins (Manage Server) decide who else gets admin — hidden from everyone else
+    # only true server admins (Manage Server) decide who else gets admin - hidden from everyone else
     async with storage.lock:
         storage.set_admin_role(interaction.guild_id, role.id if role else None)
     await interaction.response.send_message(
         f"✅ Members with {role.mention} can now use my admin commands (Manage Server still works)."
         if role
-        else "✅ Cleared the bot-admin role — only Manage Server grants admin now.",
+        else "✅ Cleared the bot-admin role - only Manage Server grants admin now.",
         ephemeral=True,
         allowed_mentions=NONE_MENTIONS,
     )
@@ -325,7 +325,7 @@ async def history_show(interaction: discord.Interaction, days: app_commands.Rang
     for zday, quests in hist:
         lines.append(f"📅 **{zday}**")
         for qt, name, ups in quests:
-            lines.append(f"{QT_EMOJI.get(qt, '•')} {esc(name)} — " + ", ".join(who(u) for u in ups))
+            lines.append(f"{QT_EMOJI.get(qt, '•')} {esc(name)} - " + ", ".join(who(u) for u in ups))
     view = PagedList(
         interaction.user.id, lines, title=f"Zaishen sign-up history ({len(hist)} day(s))", per=16
     )
@@ -358,7 +358,7 @@ async def history_enable(interaction: discord.Interaction):
         {
             "absent": "Set up the bot first with `/setup #channel`.",
             "already": "History is already being kept.",
-            "changed": "✅ I'll keep past days' sign-ups — view them with `/history show`.",
+            "changed": "✅ I'll keep past days' sign-ups - view them with `/history show`.",
         }[status],
         ephemeral=True,
     )
@@ -374,7 +374,7 @@ async def history_disable(interaction: discord.Interaction):
         {
             "absent": "Set up the bot first with `/setup #channel`.",
             "already": "History is already off.",
-            "changed": "✅ I'll stop keeping history — past days are purged at each daily reset. "
+            "changed": "✅ I'll stop keeping history - past days are purged at each daily reset. "
             "Use `/history clear` to remove what's already stored.",
         }[status],
         ephemeral=True,
@@ -387,7 +387,7 @@ tree.add_command(history)
 # ---- guild lifecycle -------------------------------------------------------
 @client.event
 async def on_guild_join(guild: discord.Guild):
-    """Greet a new server and point an admin at /setup. Best-effort — picks the system channel, else
+    """Greet a new server and point an admin at /setup. Best-effort - picks the system channel, else
     the first channel the bot can talk in."""
     target = guild.system_channel
     if not (target and target.permissions_for(guild.me).send_messages):
@@ -448,5 +448,5 @@ async def on_ready():
 
 if __name__ == "__main__":
     if not config.TOKEN:
-        raise SystemExit("DISCORD_BOT_TOKEN is not set (see gw1-zaishen-bot.conf.example).")
+        raise SystemExit("DISCORD_BOT_TOKEN is not set (see gw-zaishen-bot.conf.example).")
     client.run(config.TOKEN)

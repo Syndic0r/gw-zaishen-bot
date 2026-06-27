@@ -1,7 +1,7 @@
 """
 Discord UI: the persistent per-mission sign-up buttons on the daily message.
 
-Row 0: one toggle button per daily (🗺️ Mission / 🎯 Bounty / ⚔️ Combat / 💀 Vanquish) — tap to sign
+Row 0: one toggle button per daily (🗺️ Mission / 🎯 Bounty / ⚔️ Combat / 💀 Vanquish) - tap to sign
        up for that quest, tap again to sign off just that one.
 Row 1: ✅ All (sign up for all four at once) and 🧹 Sign off all (clear yourself from every quest).
 
@@ -32,7 +32,7 @@ class PagedList(discord.ui.View):
         self.page = 0
 
     def content(self):
-        return f"**{self.title}** — page {self.page + 1}/{len(self.pages)}\n" + "\n".join(
+        return f"**{self.title}** - page {self.page + 1}/{len(self.pages)}\n" + "\n".join(
             self.pages[self.page]
         )
 
@@ -115,7 +115,7 @@ class ZaishenView(discord.ui.View):
 
     async def _refresh(self, interaction: discord.Interaction):
         # Render fresh AFTER releasing the lock (render reads state synchronously, so it reflects
-        # other people's near-simultaneous clicks) and edit in place — this also acks the click.
+        # other people's near-simultaneous clicks) and edit in place - this also acks the click.
         try:
             await interaction.response.edit_message(
                 content=render.content(interaction.guild_id),

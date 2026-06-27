@@ -1,7 +1,7 @@
 """
 Slash-command groups.
 
-/ign — link your Discord account to your GW1 character name (self-declared; no third-party login,
+/ign - link your Discord account to your GW1 character name (self-declared; no third-party login,
 since GW1 has no account API). Used to show in-game names next to handles on the daily roster.
   /ign set <name>    link or update your GW1 name
   /ign who [@user]   show a player's linked name (defaults to you)
@@ -41,7 +41,7 @@ async def ign_set(interaction: discord.Interaction, name: str):
         return
     if len(name) > MAX_IGN_LEN:
         await interaction.response.send_message(
-            f"That's a bit long — keep it under {MAX_IGN_LEN} characters.", ephemeral=True
+            f"That's a bit long - keep it under {MAX_IGN_LEN} characters.", ephemeral=True
         )
         return
     async with storage.lock:
@@ -69,7 +69,7 @@ async def ign_who(interaction: discord.Interaction, user: discord.Member = None)
             else f"{esc(target.display_name)} hasn't"
         )
         await interaction.response.send_message(
-            f"{who} linked a GW1 name yet — use `/ign set`.",
+            f"{who} linked a GW1 name yet - use `/ign set`.",
             ephemeral=True,
             allowed_mentions=NONE_MENTIONS,
         )
@@ -89,10 +89,10 @@ async def ign_list(interaction: discord.Interaction):
     rows = storage.all_igns()
     if not rows:
         await interaction.response.send_message(
-            "No one has linked a GW1 name yet — be first with `/ign set`.", ephemeral=True
+            "No one has linked a GW1 name yet - be first with `/ign set`.", ephemeral=True
         )
         return
-    lines = [f"<@{uid}> — {esc(name)}" for uid, name in rows]
+    lines = [f"<@{uid}> - {esc(name)}" for uid, name in rows]
     view = PagedList(interaction.user.id, lines, title=f"Linked GW1 names ({len(rows)})")
     await interaction.response.send_message(
         view.content(), view=view, ephemeral=True, allowed_mentions=NONE_MENTIONS

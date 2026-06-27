@@ -1,0 +1,14 @@
+# Copy to /etc/gw1-zaishen-bot.conf  (sudo chmod 600) - holds the bot token (SECRET, never commit).
+# Referenced by gw1-zaishen-bot.service as EnvironmentFile.
+
+# NOTE: this is read by systemd (EnvironmentFile) - put comments on their OWN line, never after a
+# value. systemd keeps any inline text as PART of the value (which breaks the numeric IDs).
+
+# bot token from the Discord Developer Portal (Bot -> Reset Token)
+DISCORD_BOT_TOKEN=paste-your-bot-token-here
+
+# The bot is multi-tenant: each server's admin runs /setup in Discord to pick the channel and an
+# optional ping role, so there is nothing else to configure here beyond the token.
+
+# seconds between bottom-of-channel re-checks (also how fast a new day is picked up). Default 60.
+CHECK_INTERVAL=60

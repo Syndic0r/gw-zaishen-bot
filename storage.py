@@ -1,5 +1,5 @@
 """
-Persistence layer — the single source of truth for the bot's runtime state, backed by SQLite.
+Persistence layer - the single source of truth for the bot's runtime state, backed by SQLite.
 
 Multi-tenant: the bot serves many Discord servers (guilds) at once, so the per-server state is
 keyed by `guild_id`. The day's quests themselves are the same worldwide, so `daily` stays global,
@@ -14,7 +14,7 @@ Tables:
 
 `zaishen.py` stays the source of truth for *computing* dailies; `daily` is a recorded copy so the
 schedule + signups can be queried/joined and kept as history. Signups are NOT deleted at the daily
-rollover — the message just stops showing older days — so the full sign-up history is queryable.
+rollover - the message just stops showing older days - so the full sign-up history is queryable.
 All writes commit immediately; callers hold `lock` around any read-modify-render sequence that must
 stay consistent with the keep-at-bottom loop. SQLite calls are synchronous but tiny (local file).
 """
@@ -76,7 +76,7 @@ def _db():
 
 
 def init(db_path=None, migrate=True):
-    """Open the DB (creating tables) — call once on startup. Tests pass a temp path + migrate=False."""
+    """Open the DB (creating tables) - call once on startup. Tests pass a temp path + migrate=False."""
     global _conn
     if _conn is not None:
         _conn.close()
@@ -94,7 +94,7 @@ def init(db_path=None, migrate=True):
 
 # ---- migration: single-tenant DB -> multi-tenant ---------------------------
 def _home_guild_id():
-    """The guild that legacy single-server rows belong to — from DISCORD_GUILD_ID. None if unset."""
+    """The guild that legacy single-server rows belong to - from DISCORD_GUILD_ID. None if unset."""
     try:
         return int(config.GUILD_ID)
     except (TypeError, ValueError):
@@ -141,7 +141,7 @@ def _adopt_single_tenant():
     gid = _home_guild_id()
     if gid is None:
         print(
-            "MIGRATION: legacy single-tenant data found but DISCORD_GUILD_ID is unset — cannot "
+            "MIGRATION: legacy single-tenant data found but DISCORD_GUILD_ID is unset - cannot "
             "attribute it to a guild; dropping it.",
             flush=True,
         )
@@ -306,7 +306,7 @@ def clear_history(guild_id):
 
 
 def delete_guild(guild_id):
-    """Purge ALL of a guild's data — on removal from the server (caller holds `lock`). Leaves the
+    """Purge ALL of a guild's data - on removal from the server (caller holds `lock`). Leaves the
     global `ign` table alone, since a GW1 name is a user attribute shared across servers."""
     for t in ("signup", "pinned", "guild_config"):
         _db().execute(f"DELETE FROM {t} WHERE guild_id = ?", (guild_id,))
@@ -333,7 +333,7 @@ def set_message_id(guild_id, mid):
 def begin_day_rollover(guild_id):
     """For the keep-at-bottom loop (caller holds `lock`): if a new Zaishen day started for this guild,
     record the day's quests and drop the pinned message so a fresh post is made. Returns
-    (new_day, message_id, first_ever) — first_ever is True when the guild has no pinned row yet, so
+    (new_day, message_id, first_ever) - first_ever is True when the guild has no pinned row yet, so
     the caller can skip the daily ping on the very first post."""
     today = zaishen.zaishen_day().isoformat()
     row = (
@@ -421,7 +421,7 @@ def toggle(guild_id, zday, quest_type, uid):
 
 
 def sign_all(guild_id, zday, uid):
-    """Sign a user up for all four quests (caller holds `lock`). Idempotent — keeps existing rows."""
+    """Sign a user up for all four quests (caller holds `lock`). Idempotent - keeps existing rows."""
     now = _now()
     _db().executemany(
         "INSERT OR IGNORE INTO signup(guild_id, zday, quest_type, user_id, signed_up_at) "
@@ -441,7 +441,7 @@ def sign_off_all(guild_id, zday, uid):
 
 def signup_history(guild_id, limit_days=7):
     """Recent days that had sign-ups in this guild, newest first. Returns a list of
-    (zday, [(quest_type, quest_name, [user_id, ...]), ...]) — only quests that had sign-ups, in
+    (zday, [(quest_type, quest_name, [user_id, ...]), ...]) - only quests that had sign-ups, in
     canonical quest order. Capped to the `limit_days` most recent days with any activity."""
     order = [qt for qt, _emoji, _label in zaishen.QUEST_TYPES]
     by_day = {}
@@ -454,7 +454,7 @@ def signup_history(guild_id, limit_days=7):
         z = r["zday"]
         if z not in by_day:
             if len(days) >= limit_days:
-                continue  # older than the window — skip (rows are newest-day-first)
+                continue  # older than the window - skip (rows are newest-day-first)
             by_day[z] = {}
             days.append(z)
         by_day[z].setdefault(r["quest_type"], []).append(r["user_id"])
