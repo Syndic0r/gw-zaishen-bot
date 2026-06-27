@@ -21,7 +21,7 @@ Slash commands:
   /zaishen               - show today's Zaishen dailies (ephemeral; works anywhere)
   /history show [days]   - recent days' sign-ups in this server (ephemeral)
   /history clear|enable|disable - (admin) clear stored history / toggle keeping it
-  /ign set|who|clear|list - link your Discord to your GW1 character name (shown on the roster)
+  /ign add|remove|favorite|unfavorite|who|clear - your GW1 character names (the favorite shows on the roster)
 
 This module wires Discord together; the pieces live in:
   config.py    - environment/config + shared constants
@@ -50,7 +50,7 @@ intents = (
 )  # needs the (non-privileged) guilds intent for join/remove events
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
-tree.add_command(commands.ign)  # /ign set | who | clear | list
+tree.add_command(commands.ign)  # /ign add | remove | favorite | unfavorite | who | clear
 
 esc = discord.utils.escape_markdown
 QT_EMOJI = {qt: emoji for qt, emoji, _label in zaishen.QUEST_TYPES}
@@ -317,7 +317,9 @@ async def history_show(interaction: discord.Interaction, days: app_commands.Rang
             "No sign-ups recorded in this server yet.", ephemeral=True
         )
         return
-    igns = storage.igns_for({u for _z, quests in hist for _qt, _name, ups in quests for u in ups})
+    igns = storage.favorites_for(
+        {u for _z, quests in hist for _qt, _name, ups in quests for u in ups}
+    )
 
     def who(uid):
         name = igns.get(uid)

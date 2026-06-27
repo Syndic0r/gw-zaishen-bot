@@ -218,22 +218,54 @@ def test_migration_from_single_tenant(tmp_path, monkeypatch):
     gc = storage.get_guild_config(gid)
     assert gc["channel_id"] == 1361 and gc["enabled"] == 1  # config seeded from env
     assert storage.signups(gid, "2026-06-26")["mission"] == [42]  # signups carried over w/ guild_id
-    assert storage.get_ign(42) == "Dervish McStab"  # global ign table preserved
+    assert storage.favorite_name(42) == "Dervish McStab"  # global ign preserved (kept as favorite)
     assert not storage._has_table("_legacy_pinned")  # stash cleaned up
     assert not storage._has_table("_legacy_signup")
 
 
 # ---- IGN (global per user) -------------------------------------------------
-def test_ign_set_get_clear(tmp_path):
+def test_ign_multi_add_remove(tmp_path):
     fresh(tmp_path)
-    assert storage.get_ign(1) is None
-    storage.set_ign(1, "Dervish McStab")
-    assert storage.get_ign(1) == "Dervish McStab"
-    storage.set_ign(1, "Mesmer Mary")  # update in place
-    assert storage.get_ign(1) == "Mesmer Mary"
-    assert storage.clear_ign(1) is True
-    assert storage.get_ign(1) is None
-    assert storage.clear_ign(1) is False  # already gone
+    assert storage.add_ign(1, "Dervish McStab") == "added"
+    assert storage.add_ign(1, "Mesmer Mary") == "added"
+    assert storage.add_ign(1, "Dervish McStab") == "exists"  # no duplicates
+    assert {n for n, _f in storage.names_for(1)} == {"Dervish McStab", "Mesmer Mary"}
+    assert storage.remove_ign(1, "Mesmer Mary") is True
+    assert storage.remove_ign(1, "Mesmer Mary") is False  # already gone
+    assert {n for n, _f in storage.names_for(1)} == {"Dervish McStab"}
+
+
+def test_ign_favorite_drives_display(tmp_path):
+    fresh(tmp_path)
+    storage.add_ign(1, "Dervish McStab")
+    storage.add_ign(1, "Mesmer Mary")
+    # no favorite set -> not displayed
+    assert storage.favorite_name(1) is None
+    assert storage.favorites_for([1]) == {}
+    # set a favorite -> that one displays
+    assert storage.set_favorite(1, "Mesmer Mary") is True
+    assert storage.favorite_name(1) == "Mesmer Mary"
+    assert storage.favorites_for([1, 99]) == {1: "Mesmer Mary"}  # 99 has none -> absent
+    # switching favorite clears the old one (at most one)
+    storage.set_favorite(1, "Dervish McStab")
+    assert storage.favorite_name(1) == "Dervish McStab"
+    favs = dict(storage.names_for(1))
+    assert favs == {"Dervish McStab": True, "Mesmer Mary": False}
+    # can't favorite a name you don't have
+    assert storage.set_favorite(1, "Nobody") is False
+    # unfavorite -> nothing displays
+    assert storage.clear_favorite(1) is True
+    assert storage.favorite_name(1) is None
+    assert storage.clear_favorite(1) is False  # nothing to clear
+
+
+def test_ign_full_and_clear(tmp_path):
+    fresh(tmp_path)
+    for i in range(storage.MAX_IGNS):
+        assert storage.add_ign(1, f"Char {i}") == "added"
+    assert storage.add_ign(1, "One Too Many") == "full"  # cap enforced
+    assert storage.clear_igns(1) == storage.MAX_IGNS
+    assert storage.names_for(1) == []
 
 
 def test_ign_clean_input():
@@ -244,18 +276,19 @@ def test_ign_clean_input():
     assert _clean_ign("Zero​Width") == "ZeroWidth"  # zero-width/control chars dropped
 
 
-def test_ign_list_and_batch(tmp_path):
-    fresh(tmp_path)
-    storage.set_ign(2, "bob")
-    storage.set_ign(1, "Alice")
-    storage.set_ign(3, "charlie")
-    assert storage.all_igns() == [
-        (1, "Alice"),
-        (2, "bob"),
-        (3, "charlie"),
-    ]  # name, case-insensitive
-    assert storage.igns_for([1, 3, 99]) == {1: "Alice", 3: "charlie"}  # 99 unlinked -> absent
-    assert storage.igns_for([]) == {}
+def test_ign_old_single_name_migrates_to_favorite(tmp_path):
+    # a pre-multi-name DB (ign keyed by user_id, no favorite column) -> name kept as the favorite
+    db = str(tmp_path / "old.db")
+    import sqlite3
+
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE ign (user_id INTEGER PRIMARY KEY, name TEXT, set_at TEXT)")
+    c.execute("INSERT INTO ign VALUES (7, 'Old Main', '2026-06-01T00:00:00+00:00')")
+    c.commit()
+    c.close()
+    storage.init(db, migrate=False)
+    assert storage.names_for(7) == [("Old Main", True)]  # migrated as the favorite
+    assert storage.favorite_name(7) == "Old Main"  # still shows on the roster (no regression)
 
 
 def test_daily_recorded_for_history(tmp_path):

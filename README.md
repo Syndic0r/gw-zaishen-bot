@@ -19,7 +19,8 @@ part of the project that runs in Discord; the website and deployment live elsewh
 - **Per-mission sign-up** - one toggle button per daily (🗺️🎯⚔️💀), plus ✅ All and 🧹 Sign off all.
   Each quest shows its own roster.
 - Remembers rosters (with timestamps) per server in SQLite; `/history` looks back over past days.
-- Optional self-declared GW1 character names via `/ign`, shown next to handles on the roster.
+- Optional self-declared GW1 character names via `/ign` (a GW1 account has several; pick a favorite
+  to show next to your handle on the roster).
 - No privileged intents, no message reading, no analytics - it only posts in one channel and manages
   its own message.
 
@@ -29,7 +30,7 @@ part of the project that runs in Discord; the website and deployment live elsewh
 |---|---|---|
 | `/zaishen` | anyone | Show today's dailies (ephemeral) |
 | `/history show [days]` | anyone | Recent days' sign-ups in this server |
-| `/ign set\|who\|clear\|list` | anyone | Link your Discord to your GW1 character name |
+| `/ign add\|remove\|favorite\|unfavorite\|who\|clear` | anyone | Register your GW1 character names; pick a favorite to show on the roster |
 | `/setup #channel [role]` | admin | Choose the post channel + optional daily ping role |
 | `/enable` · `/disable` | admin | Resume / pause posting in this server |
 | `/history clear\|enable\|disable` | admin | Clear stored history / toggle keeping it |

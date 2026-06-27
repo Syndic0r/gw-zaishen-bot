@@ -10,7 +10,8 @@ Tables:
   pinned(guild_id, message_id, zday)         the current pinned message, per server
   daily(zday, quest_type, quest_name)        each day's computed quests, recorded for history (global)
   signup(guild_id, zday, quest_type, user_id, signed_up_at)  who's up for which quest, per server
-  ign(user_id, name, set_at)                 self-declared GW1 character names (global, per user)
+  ign(user_id, name, favorite, set_at)       self-declared GW1 character names (global, per user;
+                                             a user can have several, with at most one favorite)
 
 `zaishen.py` stays the source of truth for *computing* dailies; `daily` is a recorded copy so the
 schedule + signups can be queried/joined and kept as history. Signups are NOT deleted at the daily
@@ -60,11 +61,15 @@ CREATE TABLE IF NOT EXISTS signup (
     PRIMARY KEY (guild_id, zday, quest_type, user_id)
 );
 CREATE TABLE IF NOT EXISTS ign (
-    user_id INTEGER PRIMARY KEY,
-    name    TEXT NOT NULL,
-    set_at  TEXT NOT NULL
+    user_id  INTEGER NOT NULL,
+    name     TEXT    NOT NULL,
+    favorite INTEGER NOT NULL DEFAULT 0,  -- the one shown on the roster (at most one set per user)
+    set_at   TEXT    NOT NULL,
+    PRIMARY KEY (user_id, name)
 );
 """
+
+MAX_IGNS = 12  # GW1 accounts have a handful of character slots; cap to keep lists sane
 
 
 def _now():
@@ -88,6 +93,7 @@ def init(db_path=None, migrate=True):
     _ensure_columns()  # add columns introduced after a guild_config table was first created
     _conn.commit()
     _adopt_single_tenant()  # copy the stashed rows back in, stamped with the home guild id
+    _migrate_ign_multiname()  # old single-name ign -> multi-name (existing name becomes the favorite)
     if migrate:
         _migrate_from_json()
 
@@ -130,6 +136,22 @@ def _stash_single_tenant():
         _db().execute("ALTER TABLE pinned RENAME TO _legacy_pinned")
     if _has_table("signup") and "guild_id" not in _cols("signup"):
         _db().execute("ALTER TABLE signup RENAME TO _legacy_signup")
+    # old ign had one name per user (no `favorite` column) - stash it for the multi-name migration
+    if _has_table("ign") and "favorite" not in _cols("ign"):
+        _db().execute("ALTER TABLE ign RENAME TO _legacy_ign")
+    _db().commit()
+
+
+def _migrate_ign_multiname():
+    """One-time: bring the old single-name ign table into the multi-name shape, keeping each user's
+    existing name as their favorite (so it still shows on the roster)."""
+    if not _has_table("_legacy_ign"):
+        return
+    _db().execute(
+        "INSERT OR IGNORE INTO ign(user_id, name, favorite, set_at) "
+        "SELECT user_id, name, 1, set_at FROM _legacy_ign"
+    )
+    _db().execute("DROP TABLE _legacy_ign")
     _db().commit()
 
 
@@ -469,40 +491,82 @@ def signup_history(guild_id, limit_days=7):
     return out
 
 
-# ---- IGN (self-declared GW1 character name; global per user) ---------------
-def set_ign(uid, name):
-    """Link (or update) a user's GW1 character name (caller holds `lock`)."""
+# ---- IGN (self-declared GW1 character names; global per user) --------------
+# A user can register several character names; at most one is the "favorite", which is the only one
+# shown next to their handle on the roster. No favorite -> nothing is shown.
+def add_ign(uid, name):
+    """Add a character name for a user (caller holds `lock`). Does NOT auto-favorite. Returns
+    "added", "exists" (already had that name), or "full" (hit MAX_IGNS)."""
+    if _db().execute("SELECT 1 FROM ign WHERE user_id = ? AND name = ?", (uid, name)).fetchone():
+        return "exists"
+    count = _db().execute("SELECT COUNT(*) c FROM ign WHERE user_id = ?", (uid,)).fetchone()["c"]
+    if count >= MAX_IGNS:
+        return "full"
     _db().execute(
-        "INSERT INTO ign(user_id, name, set_at) VALUES (?, ?, ?) "
-        "ON CONFLICT(user_id) DO UPDATE SET name = excluded.name, set_at = excluded.set_at",
-        (uid, name, _now()),
+        "INSERT INTO ign(user_id, name, favorite, set_at) VALUES (?, ?, 0, ?)", (uid, name, _now())
     )
     _db().commit()
+    return "added"
 
 
-def get_ign(uid):
-    """A user's linked GW1 name, or None."""
-    row = _db().execute("SELECT name FROM ign WHERE user_id = ?", (uid,)).fetchone()
-    return row["name"] if row else None
-
-
-def clear_ign(uid):
-    """Remove a user's linked name (caller holds `lock`). Returns True if one existed."""
-    cur = _db().execute("DELETE FROM ign WHERE user_id = ?", (uid,))
+def remove_ign(uid, name):
+    """Remove one of a user's character names (caller holds `lock`). Returns True if it existed."""
+    cur = _db().execute("DELETE FROM ign WHERE user_id = ? AND name = ?", (uid, name))
     _db().commit()
     return cur.rowcount > 0
 
 
-def all_igns():
-    """All linked names as [(user_id, name), ...], ordered by name (case-insensitive)."""
+def set_favorite(uid, name):
+    """Make `name` the user's favorite (the one shown on the roster), clearing any other (caller
+    holds `lock`). Returns False if the user doesn't have that name."""
+    if (
+        not _db()
+        .execute("SELECT 1 FROM ign WHERE user_id = ? AND name = ?", (uid, name))
+        .fetchone()
+    ):
+        return False
+    _db().execute("UPDATE ign SET favorite = 0 WHERE user_id = ?", (uid,))
+    _db().execute("UPDATE ign SET favorite = 1 WHERE user_id = ? AND name = ?", (uid, name))
+    _db().commit()
+    return True
+
+
+def clear_favorite(uid):
+    """Unset a user's favorite so nothing shows on the roster (caller holds `lock`). True if one was
+    set."""
+    cur = _db().execute("UPDATE ign SET favorite = 0 WHERE user_id = ? AND favorite = 1", (uid,))
+    _db().commit()
+    return cur.rowcount > 0
+
+
+def clear_igns(uid):
+    """Remove ALL of a user's character names (caller holds `lock`). Returns how many were removed."""
+    cur = _db().execute("DELETE FROM ign WHERE user_id = ?", (uid,))
+    _db().commit()
+    return cur.rowcount
+
+
+def names_for(uid):
+    """A user's character names as [(name, is_favorite_bool), ...], favorite first then by name."""
     return [
-        (r["user_id"], r["name"])
-        for r in _db().execute("SELECT user_id, name FROM ign ORDER BY name COLLATE NOCASE")
+        (r["name"], bool(r["favorite"]))
+        for r in _db().execute(
+            "SELECT name, favorite FROM ign WHERE user_id = ? ORDER BY favorite DESC, name COLLATE NOCASE",
+            (uid,),
+        )
     ]
 
 
-def igns_for(uids):
-    """Batch lookup: {user_id: name} for the given user ids that have a linked name."""
+def favorite_name(uid):
+    """A user's favorite character name, or None if they haven't set one."""
+    row = (
+        _db().execute("SELECT name FROM ign WHERE user_id = ? AND favorite = 1", (uid,)).fetchone()
+    )
+    return row["name"] if row else None
+
+
+def favorites_for(uids):
+    """Batch: {user_id: favorite_name} for the given users that have a favorite set (for the roster)."""
     uids = list(uids)
     if not uids:
         return {}
@@ -510,6 +574,7 @@ def igns_for(uids):
     return {
         r["user_id"]: r["name"]
         for r in _db().execute(
-            f"SELECT user_id, name FROM ign WHERE user_id IN ({placeholders})", uids
+            f"SELECT user_id, name FROM ign WHERE favorite = 1 AND user_id IN ({placeholders})",
+            uids,
         )
     }

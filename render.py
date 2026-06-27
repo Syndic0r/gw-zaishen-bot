@@ -15,10 +15,10 @@ def content(guild_id=None):
     zday = day.isoformat()
     reset_epoch = int(zaishen.next_reset().timestamp())
     signs = storage.signups(guild_id, zday) if guild_id is not None else {}
-    igns = storage.igns_for({u for ups in signs.values() for u in ups})
+    igns = storage.favorites_for({u for ups in signs.values() for u in ups})
 
     def who(uid):
-        name = igns.get(uid)
+        name = igns.get(uid)  # the user's favorite character name, or None -> handle only
         # escape the user-supplied IGN so markdown in it can't distort the roster; the message is
         # sent with allowed_mentions=none, so any mention-like text in it never pings either.
         return f"<@{uid}> ({discord.utils.escape_markdown(name)})" if name else f"<@{uid}>"
