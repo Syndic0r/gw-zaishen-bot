@@ -8,7 +8,7 @@ import storage
 import zaishen
 
 QTS = [qt for qt, _e, _l in zaishen.QUEST_TYPES]  # mission, bounty, combat, vanquish
-ZDAY = "2026-06-27"
+ZDAY = zaishen.zaishen_day().isoformat()  # the live "today", matching storage's clear/rollover logic
 G1 = 111  # a guild id
 G2 = 222  # another guild id
 
@@ -55,7 +55,7 @@ def test_sign_all_and_off_all(tmp_path):
 def test_signups_isolated_per_day(tmp_path):
     fresh(tmp_path)
     storage.toggle(G1, ZDAY, "mission", 1)
-    assert storage.signups(G1, "2026-06-28")["mission"] == []  # a different day is empty
+    assert storage.signups(G1, "2000-01-01")["mission"] == []  # a different day is empty
 
 
 def test_signups_isolated_per_guild(tmp_path):
