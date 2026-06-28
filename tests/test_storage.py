@@ -3,14 +3,23 @@
 import sqlite3
 from datetime import date
 
+import pytest
+
 import config
 import storage
 import zaishen
 
 QTS = [qt for qt, _e, _l in zaishen.QUEST_TYPES]  # mission, bounty, combat, vanquish
-ZDAY = zaishen.zaishen_day().isoformat()  # the live "today", matching storage's clear/rollover logic
+ZDAY = "2026-06-27"  # "today" - pinned to this Zaishen day by _freeze_today below
 G1 = 111  # a guild id
 G2 = 222  # another guild id
+
+
+@pytest.fixture(autouse=True)
+def _freeze_today(monkeypatch):
+    # Pin storage's notion of "today" (clear_history, begin_day_rollover, ...) to the Zaishen day
+    # these tests are written around, so the suite stays green no matter the real calendar date.
+    monkeypatch.setattr(zaishen, "zaishen_day", lambda now=None: date(2026, 6, 27))
 
 
 def fresh(tmp_path):
@@ -55,7 +64,7 @@ def test_sign_all_and_off_all(tmp_path):
 def test_signups_isolated_per_day(tmp_path):
     fresh(tmp_path)
     storage.toggle(G1, ZDAY, "mission", 1)
-    assert storage.signups(G1, "2000-01-01")["mission"] == []  # a different day is empty
+    assert storage.signups(G1, "2026-06-28")["mission"] == []  # a different day is empty
 
 
 def test_signups_isolated_per_guild(tmp_path):
