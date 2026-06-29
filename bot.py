@@ -99,9 +99,14 @@ async def refresh_guild(gconf):
         return
 
     # Snapshot + handle the daily rollover under the lock - but do NO network here, so a button click
-    # (same lock) is never blocked on Discord I/O and can't hit the 3s interaction deadline.
+    # (same lock) is never blocked on Discord I/O and can't hit the 3s interaction deadline. We also
+    # read whether today's role ping is still owed: it is derived from a PERSISTED per-guild marker
+    # (set only after a successful send), not from the transient `new_day` flag - so if the new-day
+    # post fails on the rollover tick, a later tick can still post AND ping rather than silently
+    # dropping the ping for the day.
     async with storage.lock:
         new_day, mid, first_ever = storage.begin_day_rollover(guild_id)
+        ping_already_done = storage.ping_done_for_today(guild_id)
 
     content = render.content(guild_id)  # synchronous read of the latest roster
     view = ZaishenView()
@@ -136,13 +141,19 @@ async def refresh_guild(gconf):
                     await (await ch.fetch_message(mid)).delete()
                 except Exception:
                     pass
-            # ping the role on a genuine daily rollover - never on the guild's first-ever post
-            do_ping = bool(new_day and not first_ever and ping_role_id)
+            # ping the role on each Zaishen day's first successful post - never on the guild's
+            # first-ever post, and at most once per day (the persisted marker, set only after the send
+            # below succeeds, guarantees the once-per-day even if an earlier tick's send failed).
+            do_ping = bool(ping_role_id and not first_ever and not ping_already_done)
             mentions = ROLE_MENTIONS if do_ping else NONE_MENTIONS
             body = (f"<@&{ping_role_id}>\n" if do_ping else "") + content
             newmsg = await ch.send(body, view=view, allowed_mentions=mentions, suppress_embeds=True)
             async with storage.lock:
                 storage.set_message_id(guild_id, newmsg.id)
+                # mark the day's ping accounted for AFTER a successful send. On the first-ever post
+                # there's no ping (do_ping is False) but we still mark it so we don't ping later today.
+                if do_ping or first_ever:
+                    storage.mark_ping_done(guild_id)
     except discord.Forbidden:
         print(f"guild {guild_id}: missing permissions to post/edit/delete", flush=True)
     except Exception as e:
@@ -151,9 +162,15 @@ async def refresh_guild(gconf):
 
 async def notify_watchers():
     """Once per Zaishen day, DM each user whose watched quest (set via `/zaishen watch`) is today's
-    daily. The "already notified" marker is written BEFORE sending, so a restart never re-DMs everyone
-    (better to miss a late DM than to spam on a crash loop). DMs are best-effort - a user with DMs
-    closed is silently skipped."""
+    daily. DMs are best-effort - a user with DMs closed is silently skipped.
+
+    Marker ordering is a deliberate trade-off: the "already notified" marker is written BEFORE the
+    send loop, under the same lock as the watcher snapshot. If the bot crashes / is restarted partway
+    through the loop, the marker is already set, so we do NOT re-run the loop and re-DM the users who
+    were already reached. The cost is that watchers not yet reached when a crash hits miss that day's
+    DM. We prefer "occasionally miss one DM" over "spam everyone again on a crash loop" - a missed
+    opt-in reminder is far less harmful than duplicate DMs. (Unlike the per-guild role PING, which is
+    marked only AFTER a successful post precisely because dropping it is the worse outcome there.)"""
     today = zaishen.zaishen_day()
     today_iso = today.isoformat()
     async with storage.lock:
@@ -187,7 +204,18 @@ async def daily_loop():
     await client.wait_until_ready()
     while not client.is_closed():
         for gconf in storage.configured_guilds():
-            await refresh_guild(gconf)
+            # Bound each guild's refresh so one slow / rate-limited guild can't stall the rest of the
+            # round (or wedge the loop). refresh_guild already isolates its own network so this only
+            # guards against an unexpectedly slow Discord call; a timeout just skips this guild until
+            # the next tick. begin_day_rollover already ran under the lock and is durable, so a
+            # timed-out post simply self-heals on the next tick.
+            gid = gconf["guild_id"]
+            try:
+                await asyncio.wait_for(refresh_guild(gconf), timeout=config.GUILD_REFRESH_TIMEOUT)
+            except asyncio.TimeoutError:
+                print(f"guild {gid}: refresh timed out - skipping until next tick", flush=True)
+            except Exception as e:
+                print(f"guild {gid}: refresh raised: {e!r}", flush=True)
         try:
             await notify_watchers()
         except Exception as e:

@@ -12,3 +12,7 @@ DISCORD_BOT_TOKEN=paste-your-bot-token-here
 
 # seconds between bottom-of-channel re-checks (also how fast a new day is picked up). Default 60.
 CHECK_INTERVAL=60
+
+# Optional: per-guild refresh timeout in the daily loop so one slow / rate-limited server can't stall
+# the rest of the round. Default 30 (seconds); the line below is optional - uncomment to override.
+# GUILD_REFRESH_TIMEOUT=30

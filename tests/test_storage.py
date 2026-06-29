@@ -360,6 +360,20 @@ def test_watchers_for_day(tmp_path):
     assert watchers == {1: [("mission", "Blacktide Den")]}
 
 
+# ---- per-guild daily-ping marker -------------------------------------------
+def test_ping_marker_per_guild_per_day(tmp_path):
+    fresh(tmp_path)
+    # nothing pinged yet
+    assert storage.ping_done_for_today(G1) is False
+    assert storage.ping_done_for_today(G2) is False
+    storage.mark_ping_done(G1)
+    assert storage.ping_done_for_today(G1) is True
+    assert storage.ping_done_for_today(G2) is False  # marker is per guild
+    # a stale marker from a previous day does not count as "done today"
+    storage.set_meta(storage._ping_key(G2), "2000-01-01")
+    assert storage.ping_done_for_today(G2) is False
+
+
 # ---- kv meta ---------------------------------------------------------------
 def test_meta_kv(tmp_path):
     fresh(tmp_path)

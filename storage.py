@@ -309,12 +309,14 @@ def get_guild_config(guild_id):
 
 
 def configured_guilds():
-    """All guilds the bot should actively post in (enabled + have a channel)."""
+    """All guilds the bot should actively post in (enabled + have a channel). Selects the SAME column
+    set as get_guild_config so both return identically-shaped rows - callers can read any config field
+    (e.g. admin_role_id) off either without a KeyError footgun."""
     return (
         _db()
         .execute(
-            "SELECT guild_id, channel_id, ping_role_id, enabled, keep_history FROM guild_config "
-            "WHERE enabled = 1 AND channel_id IS NOT NULL"
+            "SELECT guild_id, channel_id, ping_role_id, admin_role_id, enabled, keep_history "
+            "FROM guild_config WHERE enabled = 1 AND channel_id IS NOT NULL"
         )
         .fetchall()
     )
@@ -730,3 +732,23 @@ def set_meta(key, value):
         (key, value),
     )
     _db().commit()
+
+
+# ---- per-guild daily-ping marker -------------------------------------------
+# The role ping must fire exactly once per guild per Zaishen day, only AFTER the day's message has been
+# posted successfully. We persist a per-guild "pinged this day" marker (mirroring watch_notified_zday)
+# so a transient send failure on the new-day tick can self-heal on a later tick and STILL ping - the
+# marker, not the transient new_day flag, decides whether the ping is still owed.
+def _ping_key(guild_id):
+    return f"pinged_zday:{guild_id}"
+
+
+def ping_done_for_today(guild_id):
+    """True if this guild's daily role ping has already been sent for the current Zaishen day."""
+    return get_meta(_ping_key(guild_id)) == zaishen.zaishen_day().isoformat()
+
+
+def mark_ping_done(guild_id):
+    """Record that this guild's daily role ping has been sent for the current Zaishen day (caller
+    holds `lock`). Call this only AFTER the message with the ping was sent successfully."""
+    set_meta(_ping_key(guild_id), zaishen.zaishen_day().isoformat())

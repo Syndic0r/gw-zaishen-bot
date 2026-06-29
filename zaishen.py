@@ -18,6 +18,7 @@ Sources: https://wiki.guildwars.com/wiki/Zaishen_Challenge_Quests and the per-qu
 """
 
 from datetime import date, datetime, timedelta, timezone
+from functools import cache
 from urllib.parse import quote
 
 RESET_HOUR_UTC = 16  # quests change daily at 16:00 UTC (fixed, no DST)
@@ -401,8 +402,11 @@ def types_with_quest(name):
     return out
 
 
+@cache
 def all_quest_names():
-    """Every distinct quest/area name across all four cycles, sorted (for command autocomplete)."""
+    """Every distinct quest/area name across all four cycles, sorted (for command autocomplete).
+    Memoized: it's a pure function of static data, so autocomplete need not rebuild + sort the ~370
+    names on every keystroke. Callers must treat the returned list as read-only (shared instance)."""
     return sorted({q for cyc in CYCLES.values() for q in cyc}, key=str.casefold)
 
 

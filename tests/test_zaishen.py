@@ -66,7 +66,6 @@ def test_next_reset():
 def test_wraparound():
     # one full mission cycle (60 days) later == same quest
     base = date(2026, 6, 23)
-    later = date(2026, 6, 23).replace(year=2026)
     from datetime import timedelta
 
     assert zaishen.quest_for("mission", base) == zaishen.quest_for(
@@ -75,7 +74,6 @@ def test_wraparound():
     assert zaishen.quest_for("combat", base) == zaishen.quest_for(
         "combat", base + timedelta(days=28)
     )
-    _ = later
 
 
 def test_next_occurrence_today_and_future():

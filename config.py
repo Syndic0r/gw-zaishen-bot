@@ -15,6 +15,7 @@ to (a) migrate the original single-server deployment into the DB and (b) speed u
                                            seed that guild's /setup config on migration
   DISCORD_PING_ROLE_ID         (optional)  legacy: the original single-server ping role (migration)
   CHECK_INTERVAL               (optional)  seconds between bottom-of-channel re-checks (default 60)
+  GUILD_REFRESH_TIMEOUT        (optional)  per-guild refresh timeout in the daily loop (default 30)
   BOT_DB_FILE                  (optional)  SQLite database path (default beside this file)
   BOT_STATE_FILE               (optional)  legacy JSON state, read once to migrate into the DB
 """
@@ -37,6 +38,9 @@ GUILD_ID = os.environ.get("DISCORD_GUILD_ID", "").split("#", 1)[0].strip()
 CHANNEL_ID = _int_env("DISCORD_ZAISHEN_CHANNEL_ID")
 PING_ROLE_ID = _int_env("DISCORD_PING_ROLE_ID")
 CHECK_INTERVAL = _int_env("CHECK_INTERVAL", 60)
+# Upper bound (seconds) on a single guild's refresh in the daily loop, so one slow / rate-limited
+# guild can't stall the whole round. Generous - a healthy refresh is well under a second.
+GUILD_REFRESH_TIMEOUT = _int_env("GUILD_REFRESH_TIMEOUT", 30)
 DB_FILE = os.environ.get("BOT_DB_FILE", "").strip() or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "gw1.db"
 )

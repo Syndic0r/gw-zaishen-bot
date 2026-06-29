@@ -89,29 +89,31 @@ class ZaishenView(discord.ui.View):
         off_btn.callback = self._offall_cb
         self.add_item(off_btn)
 
+    async def _with_today(self, interaction: discord.Interaction, op):
+        """Run a roster mutation for today's Zaishen day under the lock, then re-render. `op` is called
+        as op(guild_id, zday, user_id) while the lock is held. Centralizes the shared
+        lock / today / re-render dance for every button so it stays consistent."""
+        async with storage.lock:
+            zday = zaishen.zaishen_day().isoformat()
+            storage.ensure_daily(zday)
+            op(interaction.guild_id, zday, interaction.user.id)
+        await self._rerender(interaction)
+
     # one toggle callback per quest (closure over the quest type)
     def _quest_cb(self, quest_type):
         async def cb(interaction: discord.Interaction):
-            async with storage.lock:
-                zday = zaishen.zaishen_day().isoformat()
-                storage.ensure_daily(zday)
-                storage.toggle(interaction.guild_id, zday, quest_type, interaction.user.id)
-            await self._rerender(interaction)
+            await self._with_today(
+                interaction,
+                lambda gid, zday, uid: storage.toggle(gid, zday, quest_type, uid),
+            )
 
         return cb
 
     async def _all_cb(self, interaction: discord.Interaction):
-        async with storage.lock:
-            zday = zaishen.zaishen_day().isoformat()
-            storage.ensure_daily(zday)
-            storage.sign_all(interaction.guild_id, zday, interaction.user.id)
-        await self._rerender(interaction)
+        await self._with_today(interaction, storage.sign_all)
 
     async def _offall_cb(self, interaction: discord.Interaction):
-        async with storage.lock:
-            zday = zaishen.zaishen_day().isoformat()
-            storage.sign_off_all(interaction.guild_id, zday, interaction.user.id)
-        await self._rerender(interaction)
+        await self._with_today(interaction, storage.sign_off_all)
 
     async def _rerender(self, interaction: discord.Interaction):
         # NB: named `_rerender`, not `_refresh` - discord.ui.View has an internal `_refresh()` that it
@@ -128,7 +130,10 @@ class ZaishenView(discord.ui.View):
             )
         except Exception as e:
             print(f"toggle edit error: {e!r}", flush=True)
+            # The edit_message above already consumed interaction.response, so a second
+            # response.send_message would also fail. Use the followup webhook so the user still gets
+            # an ephemeral acknowledgement that their click was recorded.
             try:
-                await interaction.response.send_message("✅ Updated.", ephemeral=True)
+                await interaction.followup.send("✅ Updated.", ephemeral=True)
             except Exception:
                 pass
